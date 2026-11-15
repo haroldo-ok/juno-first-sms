@@ -1,0 +1,107 @@
+symbols junofirst.noi
+
+echo [1] boot to title
+run 90
+expectvdp display 1
+expect game_state == 0 w1
+expectcolors 6
+screenshot shots/00_title.ppm
+
+echo [2] start game
+tap 1
+waituntil game_state == 1 60 w1
+expect lives == 3 w1
+expect wave == 1 w1
+expect warps == 3 w1
+run 20
+screenshot shots/01_intro.ppm
+
+echo [3] shoot an enemy placed dead ahead
+poke cam_z 0
+poke px 128 w1
+poke {en_type+0} 1 w1
+poke {en_tile+0} 30 w1
+poke {en_mode+0} 1 w1
+poke {en_grp+0} 0 w1
+poke {g_n+0} 1 w1
+poke diver 1 w1
+poke {en_x+1} 128 w1
+poke {en_z+1} 110 w1
+poke {en_rel+0} 255 w1
+poke {en_st+0} 1 w1
+poke en_count 1 w1
+hold 1
+waituntil {score+3} >= 1 60 w1
+hold none
+waituntil en_count == 0 60 w1
+waituntil phase == 1 200 w1
+
+echo [4] steering
+hold left
+run 20
+expect px < 100 w1
+hold right
+run 40
+expect px > 120 w1
+hold up
+run 40
+expect pvz > 256 s16
+hold down
+run 80
+expect pvz < 0 s16
+hold none
+run 40
+expect pvz == 0 s16
+
+echo [5] enemies arrive, frame rate holds under load
+waituntil en_count >= 4 400 w1
+poke invuln 250 w1
+poke loops 0
+hold up+1
+run 240
+expect loops >= 240
+hold none
+screenshot shots/02_action.ppm
+
+echo [6] astronaut pickup -> red bonus field
+poke invuln 250 w1
+poke cam_z 0
+poke as_x 128 w1
+poke px 128 w1
+poke as_z 0x1E00
+poke as_st 1 w1
+waituntil bonus_timer > 0 60
+expect bonus_val >= 2 w1
+run 30
+screenshot shots/03_bonus.ppm
+
+echo [7] warp
+poke invuln 250 w1
+tap 2
+waituntil warps == 2 10 w1
+waituntil pstate == 0 60 w1
+
+echo [8] death and game over
+poke lives 1 w1
+poke invuln 0 w1
+poke cam_z 0
+poke px 128 w1
+poke {en_type+0} 1 w1
+poke {en_tile+0} 30 w1
+poke {en_mode+0} 1 w1
+poke {en_grp+0} 0 w1
+poke {g_n+0} 1 w1
+poke diver 1 w1
+poke {en_x+1} 128 w1
+poke {en_z+1} 27 w1
+poke {en_st+0} 1 w1
+waituntil pstate == 1 30 w1
+run 20
+screenshot shots/04_death.ppm
+waituntil game_state == 2 200 w1
+run 30
+screenshot shots/05_over.ppm
+waituntil game_state == 0 400 w1
+run 40
+expectvdp display 1
+screenshot shots/06_title2.ppm

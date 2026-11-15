@@ -1,0 +1,29 @@
+symbols junofirst.noi
+run 60
+tap 1
+psglog shots/psg.log
+run 400
+psgstop
+echo pause freezes the game
+print loops
+pause
+run 50
+print loops
+pause
+run 5
+echo soak: fly and shoot for a long time
+hold up+1
+run 1500
+hold left+1
+run 300
+hold right+down+1
+run 600
+hold 1
+run 3000
+print game_state w1
+print wave w1
+print lives w1
+print loops
+print en_count w1
+expectvdp display 1
+screenshot shots/soak.ppm
