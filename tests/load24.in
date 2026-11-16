@@ -1,0 +1,77 @@
+symbols junofirst.noi
+run 60
+tap 1
+waituntil phase == 1 300 w1
+poke wave 3 w1
+poke groups_left 0 w1
+poke {en+0} 0 w1
+poke {en+14} 0 w1
+poke {en+28} 0 w1
+poke {en+42} 0 w1
+poke {en+56} 0 w1
+poke {en+70} 0 w1
+poke {en+84} 0 w1
+poke {en+98} 0 w1
+poke {en+112} 0 w1
+poke {en+126} 0 w1
+poke {en+140} 0 w1
+poke {en+154} 0 w1
+poke {en+168} 0 w1
+poke {en+182} 0 w1
+poke {en+196} 0 w1
+poke {en+210} 0 w1
+poke {en+224} 0 w1
+poke {en+238} 0 w1
+poke {en+252} 0 w1
+poke {en+266} 0 w1
+poke {en+280} 0 w1
+poke {en+294} 0 w1
+poke {en+308} 0 w1
+poke {en+322} 0 w1
+poke en_count 0 w1
+poke {g_n+0} 0 w1
+poke {g_n+1} 0 w1
+poke {g_n+2} 0 w1
+waituntil wave == 4 30 w1
+waituntil phase == 1 300 w1
+poke lives 9 w1
+poke invuln 250 w1
+poke fire_thr 0 w1
+poke dive_thr 0 w1
+poke cam_z 0
+poke pvz 0
+poke {g_vz+0} 0
+poke {g_z+0} 320
+poke {g_vz+2} 0
+poke {g_z+2} 1200
+poke {g_vz+4} 0
+poke {g_z+4} 2080
+run 60
+print n_vis w1
+poke invuln 250 w1
+poke loops 0
+run 50
+print n_vis w1
+run 50
+print n_vis w1
+run 50
+print n_vis w1
+print loops
+screenshot shots/load24.ppm
+poke invuln 250 w1
+poke loops 0
+hold 1
+run 50
+print n_vis w1
+run 50
+print n_vis w1
+run 50
+print n_vis w1
+print loops
+hold none
+poke invuln 250 w1
+poke loops 0
+run 60
+print n_vis w1
+print loops
+print stat_degraded

@@ -1,65 +1,150 @@
-# Juno First SMS
+# Juno First for the Sega Master System
 
-A playable, arcade-style clone of Konami's 1983 classic Juno First for the Sega Master System.
+A tribute to Konami's 1983 arcade shooter *Juno First*, written for the Sega
+Master System in C (SDCC + devkitSMS) with the hot paths in Z80 assembly.
+The arcade game and Champ Games' Atari 2600 port were the references; all
+graphics, sounds and code here are original (the start jingle is the opening
+of Bach's Toccata in D minor, which is in the public domain).
 
-This project is written in C and built with `sdcc` using `devkitSMS`. The game includes a title screen, score tracking, enemy waves, bonus rescue logic, and a built-in test harness for automated playtesting.
+`junofirst.sms` is a 48 KB ROM (Sega mapper, 3 banks). It runs in any SMS
+emulator and should run on real hardware via a flash cart, though it has so
+far been tested only in an emulator.
 
-## Features
+## Playing
 
-- Side-scrolling arcade shooter gameplay inspired by Juno First
-- Multiple enemy formations and wave progression
-- Bonus astronaut rescue objective
-- Score, high score, lives, warp system, and HUD
-- Built with the Sega Master System graphics and sound libraries
-- Includes test input files for automated validation
+| Control       | Action                                                    |
+|---------------|-----------------------------------------------------------|
+| D-pad left/right | Steer                                                  |
+| D-pad up      | Thrust forward (the ship coasts for seconds when released) |
+| D-pad down    | Brake / reverse                                           |
+| Button 1      | Fire (hold for auto-fire)                                 |
+| Button 2      | Warp to a random spot (3 per life)                        |
+| Pause         | Pause                                                     |
+| Button 2 on the title screen | Choose the soundtrack: GROWL (arcade style) or SONG (melodic) |
 
-## Controls
+Fly over the perspective field and destroy every formation to clear the
+wave. Each wave sends formations of eight enemies (up to three in the air
+at once) in columns, diagonals, twin columns and snaking lines. Enemies fire
+at you, peel off to dive at you, and loop back to their place in the
+formation. Formations that you leave behind turn round and come back.
 
-- 1: Fire
-- 2: Warp
-- Left / Right: move
-- Up / Down: adjust altitude
+- **Radar** (top centre): the box shows depth from just behind you (bottom)
+  to far ahead (top); the orange ticks on each side mark the part that is on
+  screen. Enemy formations show as orange blips, you are the yellow blip, and
+  the astronaut blinks white.
+- **Astronaut**: every so often a destroyed enemy leaves an astronaut
+  floating towards you. Collect it for 500 points and about ten seconds of
+  bonus mode: the field turns red and each kill scores 200, 400, 600 … up
+  to 2,000.
+- **Points**: saucer 100, dart 150, spinner 200, bomber 300. Extra ship at
+  10,000 and every 50,000 after that.
+- **Attract mode**: leave the title screen alone for 10 seconds and the
+  game plays itself; press any button to return.
+
+## What's in it
+
+- **Perspective field**: a sparse dot lattice whose rows stream towards you
+  by palette cycling (11 phases), with faint dotted column lines converging
+  on the horizon so the field reads as lanes receding into the distance.
+  Everything on it is placed in true perspective: x is scaled towards the
+  vanishing point with a quarter-square multiply, and sprites switch between
+  three sizes with distance.
+- **Inertia**: thrust builds speed gradually and the ship keeps gliding when
+  you let go; stopping takes a deliberate brake.
+- **Williams-style effects**: dashed laser shots; enemies burst into eight
+  particles flying outward; when your ship is hit, the whole field turns
+  into an expanding ring explosion (tilemap swap plus palette animation)
+  centred on the ship.
+- **No sprite flicker by default**: a software limiter counts sprites per
+  scanline band and never lets the VDP's 8-per-line limit drop an enemy or an
+  enemy shot. Over budget, a near enemy falls back to its one-sprite far image
+  for a frame, and only particles or your own shots can be skipped.
+- **Sound**: an arcade-style menacing growl (two detuned low square waves
+  with pitch sag, creeping chromatically in D minor) or the melodic 32-bar
+  song from the previous version; plus SFX on the two remaining channels.
 
 ## Building
 
-You will need:
+Requirements: SDCC ≥ 4.2 and devkitSMS (SMSlib, PSGlib, `ihx2sms`), expected
+in `~/.devkitsms` (override with `make DEVKIT=/path`), and Python 3 for the
+asset generators.
 
-- `sdcc`
-- `devkitSMS`
-- `make`
-- `ihx2sms`
-- a Sega Master System emulator or flash cart to run the ROM
-
-From the repository root:
-
-```bash
-make
+```sh
+make            # regenerates src/gfx.h, src/snd.h, src/snd.c, builds junofirst.sms
+make playtest   # builds, then runs the headless test scripts (needs smstest)
+make clean
 ```
 
-This produces:
+Graphics, tables and music are generated by Python scripts, so tweak those
+rather than the generated files:
 
-```bash
-junofirst.sms
+- `tools/gen_gfx.py`: sprite art (as ASCII pictures), the field tiles and
+  tilemap, perspective tables, the starburst rings, particle tables, radar
+  lookups, and the title logo.
+- `tools/gen_snd.py`: the growl, the song, the Toccata jingle, the game-over
+  tune and all SFX, written straight to PSGlib's stream format. The sound
+  data lives in ROM bank 2, which stays mapped for the whole game.
+
+## Testing
+
+`smstest` is the headless SMS emulator that ships with the devkitSMS
+toolchain skill. The scripts in `tests/` drive the real ROM with scripted
+input and check game variables:
+
+- `playtest.in`: title → game → shooting a diver (particles) → inertia →
+  frame rate under load → astronaut bonus → warp → ship explosion → game over
+  → back to the title. `tests/mkplaytest.py` resolves `{symbol+offset}` pokes
+  into addresses from `junofirst.noi`.
+- `demo.txt`: attract mode starts on its own and a button cancels it.
+- `soak.txt`: long play session, pause, sound log.
+- `mkseed.py`, `mkai.py`: full games played by the built-in autopilot
+  (`poke demo 2`) for difficulty tuning.
+- `lines.in`: dumps VRAM over a long late-wave run; a short Python check of
+  the sprite table confirms no scanline ever has more than 8 sprites.
+- `load24.in`: worst-case frame-rate scenario (formations pinned on screen).
+
+## Source layout
+
+```
+src/main.c        game: state machine, player, formations, radar, HUD,
+                  ship explosion, attract-mode autopilot, and Z80 assembly
+                  for the per-frame hot paths (projection, enemy pass,
+                  scaled-sprite emitter with scanline limiter, bullet hits,
+                  particles, shot drawing, radar plotting)
+src/gfx.h         generated graphics and tables
+src/snd.h/.c      generated music and SFX (bank 2)
+tools/            generators
+tests/            smstest scripts and helpers
 ```
 
-To run the playtest suite:
+### Performance notes
 
-```bash
-make playtest
-```
+The Z80 has about 59,700 cycles per frame. 24 enemies with perspective,
+scaling and a sprite limiter don't fit in C alone, so:
 
-## Repository layout
+- Formations own fixed slots (formation *g* uses enemies 8g…8g+7). A formation
+  that is entirely off screen costs almost nothing.
+- Formations move at 30 Hz with double steps, and members refresh their
+  projected x on alternate frames, but every member's depth is recomputed
+  every frame so motion stays smooth.
+- One assembly pass per frame positions every formation member, tests it
+  against the ship and draws it; bullet hits scan only the formations that
+  are on screen.
+- The radar is rebuilt one enemy per frame over a 32-frame cycle, erasing
+  only the pixels it drew last time, and is uploaded to VRAM in six slices.
 
-- `src/` — game source code
-- `tools/` — asset generation scripts
-- `tests/` — playtest and emulator input scripts
-- `Makefile` — build rules
-- `junofirst.sms` — generated ROM
+## Known limitations
 
-## Notes
-
-The game is intentionally built to resemble the original arcade feel while running on the limitations of the Sega Master System hardware.
-
-## License
-
-This repository does not currently include a license file. If you plan to distribute or reuse it, add an explicit license before publishing.
+- The game slows down when a lot is on screen at once. In ordinary play
+  (autopilot games) over 99% of frames run at full speed, flying flat out
+  into the formations while firing gives about 98%, and waves 10–11 about
+  97%. With around 16 enemies on screen at once it drops to roughly 75%,
+  and about 20 on screen with constant firing to roughly 50% (`tests/load24.in`
+  pins three formations on screen to reproduce this). The 8-sprites-per-line
+  limit is never exceeded.
+- Difficulty is tuned against the built-in autopilot, which dodges
+  perfectly: it typically survives 7–8 minutes and reaches waves 6–9. Human
+  playtesting may call for changes, mainly in `start_wave()`.
+- Enemy flight patterns, scoring and wave structure are my interpretation of
+  the arcade game, not a measured reproduction.
+- Not yet tried on real hardware.
