@@ -1,0 +1,71 @@
+symbols junofirst.noi
+echo [1] wave 50: the final boss
+run 60
+tap 1
+waituntil phase == 1 300 w1
+poke wave 49 w1
+poke groups_left 0 w1
+poke {en+0} 0 w1
+poke {en+14} 0 w1
+poke {en+28} 0 w1
+poke {en+42} 0 w1
+poke {en+56} 0 w1
+poke {en+70} 0 w1
+poke {en+84} 0 w1
+poke {en+98} 0 w1
+poke {en+112} 0 w1
+poke {en+126} 0 w1
+poke {en+140} 0 w1
+poke {en+154} 0 w1
+poke {en+168} 0 w1
+poke {en+182} 0 w1
+poke {en+196} 0 w1
+poke {en+210} 0 w1
+poke {en+224} 0 w1
+poke {en+238} 0 w1
+poke {en+252} 0 w1
+poke {en+266} 0 w1
+poke {en+280} 0 w1
+poke {en+294} 0 w1
+poke {en+308} 0 w1
+poke {en+322} 0 w1
+poke en_count 0 w1
+poke {g_n+0} 0 w1
+poke {g_n+1} 0 w1
+poke {g_n+2} 0 w1
+waituntil wave == 50 30 w1
+expect boss_lv == 5 w1
+expect boss_hp == 72 w1
+waituntil phase == 1 200 w1
+poke lives 2 w1
+poke invuln 250 w1
+waituntil boss_rel <= 170 600 w1
+poke invuln 250 w1
+run 100
+screenshot shots/e0_final.ppm
+echo [2] bring it down
+poke boss_hp 1 w1
+poke invuln 250 w1
+poke demo 2 w1
+waituntil boss_st == 2 400 w1
+poke demo 0 w1
+echo [3] the ending plays (ship bonus, final score, THE END)
+waituntil won == 1 200 w1
+waituntil game_state == 0 200 w1
+run 400
+screenshot shots/e1_ending.ppm
+run 700
+screenshot shots/e2_ending.ppm
+expectvdp display 1
+expect wave == 50 w1
+expect boss_wave == 0 w1
+expect en_count == 0 w1
+echo [4] a button returns to the title, with the high score kept
+run 30
+tap 1
+run 90
+print {hiscore+0} w1
+print {hiscore+1} w1
+print {hiscore+2} w1
+print {hiscore+3} w1
+screenshot shots/e3_title.ppm

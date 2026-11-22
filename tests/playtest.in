@@ -78,7 +78,7 @@ screenshot shots/04_bonus.ppm
 echo [7] warp
 poke invuln 250 w1
 tap 2
-waituntil warps == 2 10 w1
+waituntil warps == 0 10 w1
 waituntil pstate == 0 60 w1
 
 echo [8] ship explosion fills the screen, then game over

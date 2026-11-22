@@ -1,0 +1,78 @@
+symbols junofirst.noi
+
+echo [1] title: right selects 3D ON, left/right cycle the three modes
+run 60
+tap right
+run 2
+expect g3d == 1 w1
+tap right
+run 2
+expect g3d == 2 w1
+tap right
+run 2
+expect g3d == 0 w1
+tap left
+run 2
+expect g3d == 2 w1
+tap left
+run 2
+expect g3d == 1 w1
+screenshot shots/3d_title.ppm
+
+echo [2] the shutter alternates every frame on the title
+run 1
+print 0xDFF8 w1
+run 1
+print 0xDFF8 w1
+
+echo [3] in game: line interrupts drive per-row scroll, shutter alternates
+tap 1
+waituntil game_state == 1 60 w1
+waituntil phase == 1 200 w1
+poke stat_lineirq 0
+run 100
+expect stat_lineirq >= 390
+expect stat_lineirq <= 410
+print stat_lineirq
+run 1
+print 0xDFF8 w1
+print eye_l w1
+run 1
+print 0xDFF8 w1
+print eye_l w1
+
+echo [4] frame rate with 3D on, ordinary play
+poke invuln 250 w1
+poke loops 0
+hold up+1
+run 300
+hold none
+print loops
+expect loops >= 285
+
+echo [5] stereo pair with formations on screen
+poke invuln 250 w1
+waituntil n_vis >= 6 600 w1
+waituntil eye_l == 0 2 w1
+run 1
+screenshot shots/3d_a.ppm
+run 1
+screenshot shots/3d_b.ppm
+print eye_l w1
+
+echo [6] 3D off again after returning to the title
+poke lives 1 w1
+poke invuln 0 w1
+poke cam_z 0
+poke pvz 0
+poke px 128 w1
+poke pxf 0x8000
+poke {en+14} 1 w1
+poke {en+18} 1 w1
+poke n_div 1 w1
+poke {div_idx+0} 1 w1
+poke {en+19} 128 w1
+poke {en+24} 0x01C0
+waituntil game_state == 0 900 w1
+run 30
+expectvdp display 1

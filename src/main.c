@@ -44,7 +44,7 @@ __sfr __at 0x7F PSGPort;
 #define MAX_GRP 3
 #define GSIZE   8
 #define MAX_PB  4
-#define MAX_EB  4
+#define MAX_EB  6                 /* 4 in normal waves, the boss fires spreads of up to 5 */
 #define MAX_BU  4
 
 #define PLAYER_REL 25
@@ -64,6 +64,10 @@ __sfr __at 0x7F PSGPort;
 #define HUD_WAVE  4
 #define HUD_SHIPS 8
 #define HUD_BONUS 16
+#define HUD_BOSS  32
+
+#define LAST_WAVE 50
+#define MAX_LIVES 5
 
 #define DEATH_TIME 110
 
@@ -103,6 +107,29 @@ u8 dbg_fire, dbg_spawn, miss_fire, miss_spawn, ok_fire, ok_kill;
 u8 demo;                       /* 1 = attract-mode demo, 2 = autopilot (testing) */
 u16 demo_timer;
 u8 burst_col;                  /* ship explosion: screen column of its centre */
+
+/* SegaScope 3-D glasses: register at $FFF8 (bit 0 picks the open shutter);
+ * writes also land in RAM at $DFF8, which nothing else uses (stack starts at $DFF0) */
+#define GLASSES (*(volatile u8 *)0xFFF8)
+u8 g3d;                        /* 0 off, 1 on, 2 on with eyes swapped */
+u8 eye_l;                      /* frame being built is for the left eye (3D on) */
+u8 band_i;                     /* line-interrupt band counter (reset each frame) */
+volatile u8 vdp_busy;          /* main loop is streaming to VRAM: line IRQ must not touch the VDP */
+const u8 *band_ptr;            /* per-row scroll table for the frame on screen */
+const u8 band_zero[9] = {0};
+u16 stat_lineirq;
+
+/* boss (every 10th wave; wave 50 is the final one, then the ending) */
+u8 boss_wave, boss_st, boss_lv, boss_x, boss_hp, boss_maxhp, boss_flash, boss_t, boss_rel, boss_dead_t;
+u8 boss_pal;                   /* palette colour to apply in VBlank (0 = none pending) */
+u16 boss_z, boss_fire_cd, boss_spawn_cd;
+u8 won;                        /* final boss destroyed: play the ending */
+u16 ai_old;                    /* autopilot's previous buttons (for press edges) */
+u8 b3_busy;                    /* ROM bank 3 is mapped in slot 2: music must not run */
+const u8 boss_col[6] = {0, RGB(0,1,3), RGB(0,2,1), RGB(2,0,3), RGB(3,2,0), RGB(3,0,0)};
+#ifdef STEREODBG
+u8 snap_eye, snap_n, snap_xn[128], snap_st[MAX_EN], snap_rel[MAX_EN], snap_sx[MAX_EN];
+#endif
 
 /* formations: each group of 8 flies as a unit, members hold slots */
 u8 g_n[MAX_GRP], g_type[MAX_GRP], g_form[MAX_GRP], g_t[MAX_GRP], g_dir[MAX_GRP], g_base[MAX_GRP];
@@ -177,17 +204,36 @@ const u8 form_dz[5][GSIZE] = {
 const u8 ring_col[7] = {RGB(3,3,3), RGB(3,3,1), RGB(3,2,0), RGB(3,1,0), RGB(2,0,0), RGB(1,0,0), 0};
 
 /* ------------------------------------------------------------------ utils */
+/* bulk tile data lives in ROM bank 3; slot 2 normally holds bank 2 (music) */
+void load_tiles_b3(const void *src, u16 tile, u16 size) {
+  b3_busy = 1;
+  SMS_mapROMBank(3);
+  SMS_loadTiles(src, tile, size);
+  SMS_mapROMBank(2);
+  b3_busy = 0;
+}
+
 u8 rand8(void) {
   rng ^= rng << 7; rng ^= rng >> 9; rng ^= rng << 8;
   return (u8)rng;
 }
 
 void frame_interrupt(void) {
+  band_i = 0;
+  if (b3_busy) return;
 #ifdef PERFDBG
   vbl_count++;
 #endif
   PSGFrame();
   PSGSFXFrame();
+}
+
+/* every 24 lines (left-eye frames only): horizontal scroll for the next band of
+ * three tile rows, so each depth band of the field gets its own stereo parallax */
+void line_interrupt(void) {
+  u8 i = ++band_i;
+  stat_lineirq++;
+  if (i < 9 && !vdp_busy) INLINE_SMS_setBGScrollX(band_ptr[i]);
 }
 
 void sfx(const u8 *d, u8 ch, u8 prio) {
@@ -279,6 +325,7 @@ void en_pass(void);       /* positions of formation members, rel, visible list, 
 void en_draw(void);       /* draw every visible enemy (scaled, scanline-limited) */
 void draw3_fast(void);    /* one scaled object from d3_x, d3_rel, d3_tile */
 void spr1_fast(void);     /* one sprite from s1_x, s1_y, s1_tile (scanline-limited) */
+u8 par_x(u8 sx, u8 rel) __sdcccall(1);  /* left-eye stereo shift of a projected x */
 void part_draw(const u8 *pairs) __sdcccall(1);  /* 4 particles around pd_sx/pd_sy */
 void draw_eshots(void);   /* enemy shots (eb_*) */
 void draw_pshots(void);   /* player shots (pb_*) */
@@ -535,6 +582,14 @@ _en_pass::
     or   a, a
     jr   Z, 00271$
     ld   b, a
+    ld   a, (_eye_l)
+    or   a, a
+    jr   Z, 00272$
+    ld   a, b
+    ld   l, 6 (ix)
+    call _par_x
+    ld   b, a
+00272$:
     ld   a, (_ed_f)
     add  a, 7 (ix)
     ld   c, a
@@ -919,6 +974,15 @@ _draw_eshots::
     call _projx
     or   a, a
     jr   Z, 00990$
+    ld   b, a
+    ld   a, (_eye_l)
+    or   a, a
+    ld   a, b
+    jr   Z, 00960$
+    ld   hl, #_d3_rel
+    ld   l, (hl)
+    call _par_x
+00960$:
     sub  a, #4
     ld   b, a
     ld   a, (_d3_rel)
@@ -939,7 +1003,7 @@ _draw_eshots::
     ld   a, (_ds_i)
     inc  a
     ld   (_ds_i), a
-    cp   a, #4
+    cp   a, #MAX_EB
     jr   C, 00901$
     ret
 
@@ -991,6 +1055,15 @@ _draw_pshots::
     call _projx
     or   a, a
     jr   Z, 00980$
+    ld   b, a
+    ld   a, (_eye_l)
+    or   a, a
+    ld   a, b
+    jr   Z, 00961$
+    ld   hl, #_d3_rel
+    ld   l, (hl)
+    call _par_x
+00961$:
     sub  a, #4
     ld   b, a
     ld   a, (_d3_rel)
@@ -1012,6 +1085,27 @@ _draw_pshots::
     ld   (_ds_i), a
     cp   a, #4
     jr   C, 00911$
+    ret
+
+; A = projected x, L = rel -> A = x for this eye (left eye: x - par_l[rel], kept in 8..247)
+_par_x::
+    ld   c, a
+    ld   a, (_eye_l)
+    or   a, a
+    ld   a, c
+    ret  Z
+    ld   h, #0
+    ld   de, #_par_l
+    add  hl, de
+    sub  a, (hl)
+    cp   a, #8
+    jr   NC, 00951$
+    ld   a, #8
+    ret
+00951$:
+    cp   a, #248
+    ret  C
+    ld   a, #247
     ret
 
 ; HL -> (dx,dy) pairs, every other pair is drawn (4 of 8)
@@ -1116,6 +1210,8 @@ void put_digits(u8 x, u8 y, const u8 *d) {
   for (i = 0; i < 6; i++) SMS_setTile((u16)(d[i] + 16));
 }
 
+void draw_boss_bar(void);
+
 void hud_flush(void) {
   if (hud_dirty & HUD_SCORE) put_digits(7, 0, score);
   if (hud_dirty & HUD_HI) put_digits(26, 0, hiscore);
@@ -1127,7 +1223,8 @@ void hud_flush(void) {
     SMS_setTileatXY(7, 1, (u16)(lives + 16));
     SMS_setTileatXY(7, 2, (u16)(warps + 16));
   }
-  if (hud_dirty & HUD_BONUS) {
+  if (hud_dirty & HUD_BOSS) draw_boss_bar();
+  if ((hud_dirty & HUD_BONUS) && !boss_wave) {
     if (bonus_timer) {
       print_yel(21, 2, "BONUS ");
       SMS_setTile((u16)((bonus_val >= 20 ? 2 : bonus_val >= 10 ? 1 : 0) + 16) | TILE_USE_SPRITE_PALETTE);
@@ -1179,9 +1276,9 @@ void inc_digit(u8 i) {
     if (++score[i] < 10) break;
     score[i] = 0;
     if (i == 2) {                 /* carry into the ten-thousands digit */
-      if (++tenk_count == next_extra) {
-        next_extra += 5;
-        if (lives < 9) { lives++; hud_dirty |= HUD_SHIPS; }
+      if (++tenk_count == next_extra) {   /* extra ship at 20,000, then every 60,000 */
+        next_extra += 6;
+        if (lives < MAX_LIVES) { lives++; hud_dirty |= HUD_SHIPS; }
         sfx(sfx_extra, SFX_CHANNEL2, 4);
       }
     }
@@ -1252,7 +1349,7 @@ void draw_bursts(void) {
     sc = bu_big[i] ? 0 : rel < 64 ? 1 : rel < 136 ? 2 : 3;
     tile = SPR_PART + (t < 5 ? 0 : t < 10 ? 2 : t < 16 ? 4 : 6);
     pt = ptab + (u16)sc * 384 + (u16)(t - 1) * 16 + ((frame & 1) << 1);
-    pd_sx = sx; pd_sy = sy; pd_tile = tile;
+    pd_sx = eye_l ? par_x(sx, rel) : sx; pd_sy = sy; pd_tile = tile;
     part_draw(pt);                       /* even/odd particle sets on alternate frames */
   }
 }
@@ -1400,7 +1497,7 @@ void kill_player(void) {
 
 void respawn(void) {
   u8 i;
-  pstate = PL_ALIVE; invuln = 120; pxf = 0x8000u; px = 128; pvx = 0; warps = 3;
+  pstate = PL_ALIVE; invuln = 120; pxf = 0x8000u; px = 128; pvx = 0; warps = 1;
   hud_dirty |= HUD_SHIPS;
   for (i = 0; i < MAX_EB; i++) eb_st[i] = 0;
   /* formations regroup well ahead of the player */
@@ -1430,11 +1527,11 @@ void update_player(void) {
     else if (keys & PORT_A_KEY_DOWN) { pvz -= 2; if (pvz < -24) pvz = -24; }
     else if (!(frame & 7)) { if (pvz > 0) pvz--; else if (pvz < 0) pvz++; }
     if (fire_cd) fire_cd--;
-    if ((keys & PORT_A_KEY_1) && !fire_cd) {
+    if ((pressed & PORT_A_KEY_1) && !fire_cd) {   /* one shot per press, no auto-fire */
       for (i = 0; i < MAX_PB; i++) {
         if (!pb_st[i]) {
           pb_st[i] = 1; pb_x[i] = px; pb_z[i] = cam_z + ((PLAYER_REL + 6) << 4);
-          fire_cd = 7;
+          fire_cd = 3;
           sfx(sfx_shot, SFX_CHANNEL2, 1);
           break;
         }
@@ -1490,40 +1587,47 @@ void kill_enemy(u8 i, u8 scored) {
   } else {
     add_score(pts_h[en[i].type], pts_t[en[i].type]);
     if (astro_cd) astro_cd--;
-    if (!astro_cd && !as_st) {
+    if (!astro_cd && !as_st && !boss_wave) {
       as_st = 1; as_x = en[i].xh; as_z = cam_z + ((u16)en[i].rel << 4);
       astro_cd = 10;
     }
   }
 }
 
-void fire_at_player(u8 i, u8 rel) {
-  u8 j;
+/* x speed (8.8) that brings a shot fired from (x, rel) onto the player's column */
+s16 aim_vx(u8 x, u8 rel) {
   u16 t;
   s16 dx;
-  for (j = 0; j < eb_max; j++) {
-    if (!eb_st[j]) {
-      t = ((u16)(rel - PLAYER_REL) << 4) / eb_spd;      /* frames to reach the player */
-      if (!t) t = 1;
-      dx = (s16)px - (s16)en[i].xh;
-      dx = (s16)(((s16)(dx << 6) / (s16)t) << 2);
-      if (dx > 0x180) dx = 0x180; else if (dx < -0x180) dx = -0x180;
+  t = ((u16)(u8)(rel - PLAYER_REL) << 4) / eb_spd;      /* frames to reach the player */
+  if (!t) t = 1;
+  dx = (s16)px - (s16)x;
+  dx = (s16)(((s16)(dx << 6) / (s16)t) << 2);
+  if (dx > 0x180) dx = 0x180; else if (dx < -0x180) dx = -0x180;
+  return dx;
+}
+
+u8 free_eb(u8 limit) {
+  u8 j;
+  for (j = 0; j < limit; j++) if (!eb_st[j]) return j;
+  return 255;
+}
+
+void fire_at_player(u8 i, u8 rel) {
+  u8 j = free_eb(eb_max);
+  if (j == 255) return;
 #ifdef PERFDBG
-      dbg_fire = 1;
+  dbg_fire = 1;
 #endif
-      eb_st[j] = 1; eb_x[j] = (u16)en[i].xh << 8; eb_z[j] = cam_z + ((u16)rel << 4); eb_vx[j] = dx;
-      sfx(sfx_eshot, SFX_CHANNEL2, 0);
-      return;
-    }
-  }
+  eb_st[j] = 1; eb_x[j] = (u16)en[i].xh << 8; eb_z[j] = cam_z + ((u16)rel << 4); eb_vx[j] = aim_vx(en[i].xh, rel);
+  sfx(sfx_eshot, SFX_CHANNEL2, 0);
 }
 
 /* each formation follows its own flight path */
 void update_groups(void) {
   static u8 g, t, xh;
   static s16 r;
-  if (frame & 1) return;                /* 30 Hz, double steps */
-  for (g = 0; g < MAX_GRP; g++) {
+  for (g = 0; g < MAX_GRP; g++) {      /* each at 30 Hz, double steps: 0 and 2 on */
+    if ((g == 1) != (frame & 1)) continue; /* even frames, 1 on odd ones, to spread the load */
     if (!g_n[g]) continue;
     t = (g_t[g] += 2);
     xh = g_xh[g];
@@ -1646,7 +1750,7 @@ void spawn_group(u16 dist) {
   dbg_spawn = 1;
 #endif
   g_n[g] = k;
-  groups_left--;
+  if (groups_left) groups_left--;
 }
 
 void pb_killed(u8 j, u8 i) {
@@ -1801,20 +1905,30 @@ void update_astro(void) {
   }
 }
 
+void start_boss(void);
+
 void start_wave(void) {
-  u8 w = wave > 12 ? 12 : wave;
+  u8 w = wave;
   phase = PH_INTRO; phase_timer = 120;
-  groups_left = wave < 2 ? 2 : (wave < 4 ? 3 : (wave < 8 ? 4 : 5));
-  grp_max = wave < 2 ? 2 : 3;
-  fire_thr = (w > 6 ? 8 : 2 + w) << 4;
-  dive_thr = (w > 6 ? 8 : 2 + w) << 4;
-  max_div = wave < 3 ? 1 : (wave < 6 ? 2 : 3);
-  eb_max = 2 + (w >> 2); if (eb_max > MAX_EB) eb_max = MAX_EB;
-  eb_spd = 22 + w;
-  g_speed = 5 + (w >> 1);
+  groups_left = w < 2 ? 2 : (w < 20 ? 3 : 4);   /* 16, then 24, then 32 enemies a wave */
+  grp_max = w < 2 ? 2 : 3;
+  fire_thr = (3 + (w >> 2) > 13 ? 13 : 3 + (w >> 2)) << 4;   /* keeps rising until wave 40 */
+  dive_thr = (2 + (w >> 2) > 12 ? 12 : 2 + (w >> 2)) << 4;
+  max_div = w < 3 ? 1 : (w < 12 ? 2 : 3);
+  eb_max = 2 + w / 10; if (eb_max > 4) eb_max = 4;
+  eb_spd = 22 + (w >> 1);
+  g_speed = 5 + w / 5;
   dive_vz = -(g_speed + 18);
   spawn_cd = 0;
   hud_dirty |= HUD_WAVE;
+  boss_wave = (w % 10 == 0);
+  if (boss_wave) {
+    groups_left = 0; grp_max = 1;         /* one escort formation at a time */
+    if (bonus_timer) { bonus_timer = 0; line_col = COL_LINE; line_dirty = 1; }
+    show_msg("WAVE 00 - BOSS");
+    start_boss();
+    return;
+  }
   show_msg("WAVE 00");
   /* the first formations are already on their way (watch the radar) */
   spawn_group(360);
@@ -1829,6 +1943,7 @@ void start_music(void) {
 }
 
 void update_phase(void) {
+  if (won) return;                     /* the final boss is down: the ending takes over */
   if (phase == PH_INTRO) {
     if (--phase_timer == 0) {
       phase = PH_ACTION;
@@ -1838,14 +1953,157 @@ void update_phase(void) {
   } else if (phase == PH_ACTION) {
     if (spawn_cd) spawn_cd--;
     else if (groups_left && en_count + GSIZE <= MAX_EN) { spawn_group(600 + (rand8() & 127)); spawn_cd = 90; }
-    if (!groups_left && !en_count && pstate == PL_ALIVE) {
-      if (wave < 99) wave++;
+    if (!groups_left && !en_count && pstate == PL_ALIVE && !boss_wave) {
+      wave++;
       start_wave();
     }
   } else {
     if (phase_timer) phase_timer--;
     if (!phase_timer || (phase_timer < 190 && (pressed & (PORT_A_KEY_1 | PORT_A_KEY_2)))) game_state = ST_TITLE;
   }
+}
+
+/* ------------------------------------------------------------------- boss */
+void start_boss(void) {
+  boss_lv = wave / 10;
+  boss_maxhp = boss_lv == 5 ? 72 : 16 + (boss_lv << 3);
+  boss_hp = boss_maxhp;
+  boss_st = 1; boss_t = 0; boss_flash = 0; boss_dead_t = 0;
+  boss_x = 128;
+  boss_z = cam_z + ((u16)420 << 4);             /* far ahead: it shows on the radar first */
+  boss_fire_cd = 150;
+  boss_spawn_cd = 240;
+  boss_rel = 255;
+  boss_pal = boss_col[boss_lv];
+  hud_dirty |= HUD_BOSS;
+  sfx(sfx_warp, SFX_CHANNEL2, 4);
+}
+
+void boss_fire(u8 rel) {
+  u8 n = boss_lv == 5 ? 5 : 3, k, j;
+  s16 base = aim_vx(boss_x, rel), vx;
+  for (k = 0; k < n; k++) {
+    j = free_eb(MAX_EB);
+    if (j == 255) return;
+    vx = base + (s16)((s16)k - (s16)(n >> 1)) * 0x90;
+    eb_st[j] = 1; eb_x[j] = (u16)boss_x << 8; eb_z[j] = cam_z + ((u16)(rel - 4) << 4); eb_vx[j] = vx;
+  }
+  sfx(sfx_eshot, SFX_CHANNEL2, 1);
+}
+
+void boss_finish(void) {
+  u8 i;
+  for (i = 0; i < MAX_EN; i++)                  /* its escorts go down with it */
+    if (en[i].st == 1) {
+      if (en[i].rel != 255) spawn_burst(en[i].xh, cam_z + ((u16)en[i].rel << 4), 0);
+      en[i].st = 0;
+    }
+  for (i = 0; i < MAX_GRP; i++) g_n[i] = 0;
+  en_count = 0; n_div = 0; div_idx[0] = div_idx[1] = div_idx[2] = 255;
+  for (i = 0; i < MAX_EB; i++) eb_st[i] = 0;
+  boss_st = 0; boss_wave = 0;
+  hud_dirty |= HUD_BOSS;
+  add_score(boss_lv * 50, 0);                   /* 5,000 x boss level */
+  if (boss_lv == 5) { won = 1; game_state = ST_TITLE; return; }
+  wave++;
+  start_wave();
+}
+
+void update_boss(void) {
+  s16 r, corr;
+  u8 target, lim, i;
+  if (!boss_st) return;
+  boss_t++;
+  r = (s16)(boss_z - cam_z) >> 4;
+  if (boss_st == 1) {
+    /* depth: close in to ~140 units, then hold that distance whatever the player does */
+    target = 140 + ((s8)sin4[boss_t] >> 2);
+    if (boss_lv >= 3 && (boss_t & 0xC0) == 0xC0) target = 90;   /* lunges closer now and then */
+    corr = ((s16)target - r) << 1;
+    lim = 10 + (boss_lv << 1);
+    if (corr > lim) corr = lim; else if (corr < -(s16)lim) corr = -(s16)lim;
+    boss_z += pvz + corr;
+    /* sideways sweep, faster for later bosses */
+    boss_x = 128 + (u8)((s8)sin4[(u8)(boss_t * (1 + (boss_lv >> 1)))] << 1);
+    if (phase == PH_ACTION && pstate == PL_ALIVE && r > 40 && r < 212) {
+      if (!--boss_fire_cd) { boss_fire((u8)r); boss_fire_cd = 72 - (boss_lv << 3); }
+      if (!--boss_spawn_cd) {
+        boss_spawn_cd = 560 - boss_lv * 60;
+        if (en_count + GSIZE <= MAX_EN) {
+          spawn_group((u16)r + 16);             /* escorts launch from behind the boss */
+          for (i = 0; i < MAX_GRP; i++)
+            if (g_n[i] && g_t[i] < 2) { g_base[i] = boss_x; g_x[i] = (u16)boss_x << 8; g_xh[i] = boss_x; }
+        }
+      }
+    }
+    if (boss_flash) boss_flash--;
+  } else {                                      /* exploding */
+    boss_z += pvz;
+    if (!(boss_t & 7)) {
+      spawn_burst(boss_x - 24 + (rand8() % 49), boss_z + ((u16)(rand8() & 15) << 4), boss_dead_t > 50);
+      sfx(sfx_boom, SFX_CHANNEL3, 3);
+    }
+    if (++boss_dead_t >= 100) { boss_finish(); return; }
+  }
+  boss_rel = (r >= 0 && r < 224) ? (u8)r : 255;
+}
+
+/* player shots against the boss (after the enemy hit test) */
+void boss_hits(void) {
+  u8 i, rel, d, hw;
+  if (boss_st != 1 || boss_rel == 255) return;
+  hw = boss_rel < 136 ? 22 : 18;
+  for (i = 0; i < MAX_PB; i++) {
+    if (!pb_st[i]) continue;
+    rel = (u8)((pb_z[i] - cam_z) >> 4);
+    d = rel > boss_rel ? rel - boss_rel : boss_rel - rel;
+    if (d > 8) continue;
+    d = pb_x[i] > boss_x ? pb_x[i] - boss_x : boss_x - pb_x[i];
+    if (d >= hw) continue;
+    pb_st[i] = 0;
+    boss_flash = 8;
+    add_score(0, 1);
+    hud_dirty |= HUD_BOSS;
+    if (!--boss_hp) {
+      boss_st = 2; boss_dead_t = 0;
+      sfx(sfx_die, SFX_CHANNELS2AND3, 5);
+      return;
+    }
+    sfx(sfx_boom, SFX_CHANNEL3, 2);
+  }
+}
+
+/* 32x32 near, 24x24 mid, 16x16 far; drawn right after the player and enemy shots */
+void draw_boss(void) {
+  static u8 rel, sx, cols, rows, c, tile, y0, x, half;
+  static u16 dz;
+  if (!boss_st) return;
+  if (boss_st == 1 && (boss_flash & 2)) return;          /* hit flash */
+  if (boss_st == 2 && (boss_dead_t & 2) && boss_dead_t > 60) return;
+  dz = boss_z - cam_z;
+  if (dz >= VIS_Z) return;
+  rel = (u8)(dz >> 4);
+  sx = projx(boss_x, rel);
+  if (!sx) return;
+  if (eye_l) sx = par_x(sx, rel);
+  y0 = ylut[rel];
+  if (rel < 136) { cols = 4; rows = 2; tile = SPR_BOSS_BIG; half = 16; y0 -= 24; }
+  else if (rel < 200) { cols = 3; rows = 2; tile = SPR_BOSS_MID; half = 12; y0 -= 22; }
+  else { cols = 2; rows = 1; tile = SPR_BOSS_FAR; half = 8; y0 -= 8; }
+  if (sx < half || sx > 255 - half) return;              /* never wrap round the screen */
+  for (; rows; rows--, y0 += 16) {
+    x = sx - half;
+    for (c = cols; c; c--, x += 8, tile += 2) SMS_addSprite(x, y0, tile);
+    band_add(y0, cols);
+  }
+}
+
+void draw_boss_bar(void) {
+  u8 i, n;
+  if (!boss_wave) { print_at(21, 2, "           "); return; }
+  n = (u8)(((u16)boss_hp * 6 + boss_maxhp - 1) / boss_maxhp);
+  print_yel(21, 2, "BOSS ");
+  for (i = 0; i < 6; i++) SMS_setTile((u16)((i < n ? '#' : '-') - 32) | TILE_USE_SPRITE_PALETTE);
 }
 
 /* sprite list, part 1 (before the enemy pass, which draws the enemies) */
@@ -1861,6 +2119,7 @@ void begin_sprites(void) {
   }
   ds_t0 = SPR_EBUL + ((frame & 4) ? 2 : 0); ds_t1 = SPR_EBUL_S;
   draw_eshots();                       /* enemy shots first: they must never drop out */
+  draw_boss();
   ed_f = (frame & 8) ? 10 : 0;
 }
 
@@ -1873,12 +2132,20 @@ void end_sprites(void) {
     if (dz < VIS_Z) {
       rel = (u8)(dz >> 4);
       sx = projx(as_x, rel);
-      if (sx) draw3(sx, rel, SPR_ASTRO + ((frame & 16) ? 10 : 0));
+      if (sx) draw3(par_x(sx, rel), rel, SPR_ASTRO + ((frame & 16) ? 10 : 0));
     }
   }
   draw_bursts();
   draw_pshots();
   SMS_finalizeSprites();
+#ifdef STEREODBG
+  { u8 i;                              /* consistent snapshot for the stereo test */
+    extern u8 SpriteTableXN[];
+    snap_eye = eye_l; snap_n = SpriteNextFree;
+    for (i = 0; i < 128; i++) snap_xn[i] = SpriteTableXN[i];
+    for (i = 0; i < MAX_EN; i++) { snap_st[i] = en[i].st; snap_rel[i] = en[i].rel; snap_sx[i] = en[i].sx; }
+  }
+#endif
 }
 
 /* Autopilot for the attract mode: dodge shots, line up on the nearest
@@ -1912,14 +2179,21 @@ u16 ai_keys(void) {
     }
     if (rel < best) { best = rel; bx = xh; }
   }
-  if (as_st) {
+  d = 0;
+  if (as_st && (u16)(as_z - cam_z) < VIS_Z) {
     rel = (u8)((as_z - cam_z) >> 4);
-    if (rel < best && rel >= PLAYER_REL - 8) { best = rel; bx = as_x; }
+    if (rel < best && rel >= PLAYER_REL - 8) { best = rel; bx = as_x; d = 1; }
+  }
+  if (boss_st == 1 && boss_rel < best) { best = boss_rel; bx = boss_x; }
+  if (d) {                             /* fly to the astronaut, don't keep a distance */
+    i = PORT_A_KEY_1 | (pvz < 16 ? PORT_A_KEY_UP : 0);
+    if (bx > px + 3) i |= PORT_A_KEY_RIGHT; else if (bx + 3 < px) i |= PORT_A_KEY_LEFT;
+    return i;
   }
   if (best == 255) return PORT_A_KEY_1 | (pvz < 24 ? PORT_A_KEY_UP : 0);
   i = PORT_A_KEY_1;
   if (!hold) { if (bx > px + 3) i |= PORT_A_KEY_RIGHT; else if (bx + 3 < px) i |= PORT_A_KEY_LEFT; }
-  if (best > 150 && pvz < 20) i |= PORT_A_KEY_UP; else if (best < 70 && pvz > -4) i |= PORT_A_KEY_DOWN;
+  if (best > 150 && pvz < 20) i |= PORT_A_KEY_UP; else if (best < 60 && pvz > -4) i |= PORT_A_KEY_DOWN;
   return i;
 }
 
@@ -1931,7 +2205,9 @@ void read_keys(void) {
       oldkeys = keys;
     }
     keys = ai_keys();
-    pressed = 0;
+    if (frame & 4) keys &= ~PORT_A_KEY_1;   /* the autopilot taps fire too */
+    pressed = keys & ~ai_old;
+    ai_old = keys;
     return;
   }
   pressed = keys & ~oldkeys;
@@ -1971,6 +2247,12 @@ void death_vblank(void) {
 }
 
 /* ------------------------------------------------------------------ title */
+void print_3d_option(void) {
+  print_yel(4, 20, g3d == 0 ? "< > 3-D GLASSES: OFF        " :
+                   g3d == 1 ? "< > 3-D GLASSES: ON         " :
+                              "< > 3-D GLASSES: ON SWAPPED ");
+}
+
 void title(void) {
   u8 r, i, blink = 0;
   u16 idle = 0;
@@ -1978,7 +2260,7 @@ void title(void) {
   SMS_waitForVBlank();
   SMS_displayOff();
   SMS_initSprites(); SMS_finalizeSprites(); SMS_copySpritestoSAT();
-  SMS_loadTiles(logo_tiles, LOGO_BASE, sizeof(logo_tiles));
+  load_tiles_b3(logo_tiles, LOGO_BASE, sizeof(logo_tiles));
   for (r = 0; r < 24; r++) draw_field_row(r);
   print_at(0, 0, " SCORE 000000          HI 000000");
   for (r = 0; r < LOGO_H; r++) {
@@ -1992,6 +2274,7 @@ void title(void) {
   print_at(8, 21, "1:FIRE   2:WARP");
   print_at(1, 23, "A TRIBUTE TO KONAMI'S 1983 GAME");
   print_yel(5, 22, sound_mode ? "BUTTON 2 MUSIC: SONG " : "BUTTON 2 MUSIC: GROWL");
+  print_3d_option();
   hud_dirty = HUD_SCORE | HUD_HI; hud_flush();
   line_col = COL_LINE; line_dirty = 1;
   SMS_displayOn();
@@ -2013,9 +2296,90 @@ void title(void) {
     }
     if (pressed & PORT_A_KEY_2) { sound_mode ^= 1; idle = 0; }
     if (pressed & PORT_A_KEY_2) print_yel(5, 22, sound_mode ? "BUTTON 2 MUSIC: SONG " : "BUTTON 2 MUSIC: GROWL");
+    if (pressed & (PORT_A_KEY_LEFT | PORT_A_KEY_RIGHT)) {
+      g3d = (pressed & PORT_A_KEY_RIGHT) ? (g3d == 2 ? 0 : g3d + 1) : (g3d == 0 ? 2 : g3d - 1);
+      print_3d_option();
+      idle = 0;
+    }
+    if (g3d) GLASSES = (frame & 1) ^ (g3d == 2);
     if (pressed & PORT_A_KEY_1) break;
     if (++idle == 600) { demo = 1; demo_timer = 2400; break; }
   }
+}
+
+/* ----------------------------------------------------------------- ending */
+const char * const end_text[5] = {
+  "THE MOTHERSHIP IS DESTROYED",
+  "THE INVADERS ARE IN RETREAT",
+  "THE SECTOR IS SAFE AGAIN",
+  "CONGRATULATIONS, PILOT!",
+  "THE END"
+};
+const u8 end_row[5] = {5, 7, 9, 12, 20};
+
+void print_centered(u8 row, const char *t) {
+  u8 n = 0;
+  const char *q = t;
+  while (*q++) n++;
+  print_at((32 - n) >> 1, row, t);
+}
+
+void ending(void) {
+  u8 line = 0, shiprel = PLAYER_REL, sx, k, blink = 0, ships = lives;
+  u16 t = 0, speed = 8;
+  for (k = 0; k < ships; k++) add_score(100, 0);         /* 10,000 per ship left */
+  for (k = 0; k < MAX_BU; k++) bu_t[k] = 0;
+  pstate = PL_ALIVE; invuln = 0; eye_l = 0;
+  line_col = COL_LINE; line_dirty = 1;
+  PSGStop(); PSGSFXStop();
+  PSGPlay((void *)mus_game);
+  for (;;) {
+    read_keys();
+    frame++; t++;
+    cam_z += speed;                                      /* the field speeds up */
+    if (!(t & 7) && speed < 56) speed++;
+    if (t > 90 && shiprel < 223) shiprel++;              /* and the ship flies off */
+    if (!(t & 31) && t < 1200)                           /* fireworks */
+      spawn_burst(40 + (rand8() % 177), cam_z + ((u16)(120 + (rand8() & 63)) << 4), 1);
+    update_bursts();
+    SMS_initSprites();
+    memset(row_n, 0, sizeof(row_n));
+    n_spr = 0;
+    if (shiprel < 223) {
+      sx = projx(px, shiprel);
+      if (sx) {
+        if (shiprel < 90) draw16(sx, ylut[shiprel] - 8, SPR_PLAYER + ((frame & 2) ? 4 : 0));
+        else SMS_addSprite(sx - 4, ylut[shiprel] - 8, SPR_PLAYER_SMALL);
+      }
+    }
+    draw_bursts();
+    SMS_finalizeSprites();
+    SMS_waitForVBlank();
+    SMS_copySpritestoSAT();
+    if (g3d) GLASSES = (frame & 1) ^ (g3d == 2);
+    field_update();
+    if (t % 150 == 0 && line < 7) {                      /* one line of text at a time */
+      if (line < 4) print_centered(end_row[line], end_text[line]);
+      else if (line == 4) {
+        print_at(7, 15, "SHIP BONUS 0 X 10000");
+        SMS_setTileatXY(18, 15, (u16)(ships + 16));
+      } else if (line == 5) {
+        print_at(7, 17, "FINAL SCORE");
+        put_digits(19, 17, score);
+      } else print_centered(end_row[4], end_text[4]);
+      hud_dirty |= HUD_SCORE;
+      line++;
+    }
+    hud_flush();
+    if (line == 7) {
+      if (!(t & 31)) {
+        blink ^= 1;
+        if (blink) print_at(9, 22, "PUSH BUTTON 1"); else draw_field_row(22);
+      }
+      if ((pressed & (PORT_A_KEY_1 | PORT_A_KEY_2)) || t > 5400) break;
+    }
+  }
+  PSGStop(); PSGSFXStop();
 }
 
 /* ------------------------------------------------------------------- play */
@@ -2024,7 +2388,7 @@ void play(void) {
   SMS_waitForVBlank();
   SMS_displayOff();
   SMS_initSprites(); SMS_finalizeSprites(); SMS_copySpritestoSAT();
-  SMS_loadTiles(burst_tiles, BURST_BASE, sizeof(burst_tiles));
+  load_tiles_b3(burst_tiles, BURST_BASE, sizeof(burst_tiles));
   radar_static();
   SMS_loadTiles(radar_buf, RADAR_BASE, sizeof(radar_buf));
   for (i = 0; i < 24; i++) draw_field_row(i);
@@ -2036,8 +2400,9 @@ void play(void) {
   for (i = 0; i < MAX_GRP; i++) g_n[i] = 0;
   for (i = 0; i < MAX_BU; i++) bu_t[i] = 0;
   as_st = 0; en_count = 0; n_div = 0; div_idx[0] = div_idx[1] = div_idx[2] = 255;
-  lives = 3; wave = 1; warps = 3;
-  tenk_count = 0; next_extra = 1;
+  boss_st = 0; boss_wave = 0; won = 0; ai_old = 0;
+  lives = 3; wave = 1; warps = 1;
+  tenk_count = 0; next_extra = 2;
   px = 128; pxf = 0x8000u; pvx = 0; pvz = 0; pstate = PL_ALIVE; invuln = 60; fire_cd = 0;
   bonus_timer = 0; astro_cd = 6;
   line_col = COL_LINE; line_dirty = 1;
@@ -2047,6 +2412,12 @@ void play(void) {
   start_wave();
   game_state = ST_PLAY;
   hud_dirty = 0xFF; hud_flush(); msg_flush();
+  band_ptr = band_zero;
+  vdp_busy = 0;
+  if (g3d) {
+    SMS_setLineInterruptHandler(&line_interrupt);
+    SMS_setLineCounter(23);            /* IRQ after lines 23, 47, 71 ... */
+  }
   SMS_displayOn();
   if (!demo) PSGPlayNoRepeat((void *)mus_start);
   if (demo) print_yel(9, 11, "PUSH BUTTON 1");
@@ -2058,17 +2429,21 @@ void play(void) {
       PSGStop(); PSGSFXStop();
       for (;;) {
         SMS_waitForVBlank();
+        if (g3d) GLASSES = (++frame & 1) ^ (g3d == 2);
         if (SMS_queryPauseRequested()) { SMS_resetPauseRequest(); break; }
       }
       if (music_on) PSGResume();
       read_keys();
     }
     frame++; loops++;
+    eye_l = g3d && !(frame & 1);       /* 3D: even frames left eye, odd frames right */
     update_player();
     update_groups();
     begin_sprites();
     update_enemies();                  /* also draws the enemies */
     update_pbullets();
+    boss_hits();
+    update_boss();
     update_ebullets();
     update_astro();
     update_bursts();
@@ -2076,6 +2451,7 @@ void play(void) {
     if ((frame & 31) < 24 && pstate != PL_DYING) build_radar(frame & 31);
     end_sprites();
     SMS_waitForVBlank();
+    vdp_busy = 1;
 #ifdef PERFDBG
     {
       u8 nb = 0, k;
@@ -2090,6 +2466,13 @@ void play(void) {
     }
 #endif
     SMS_copySpritestoSAT();
+    if (g3d) {
+      GLASSES = (frame & 1) ^ (g3d == 2);  /* open the shutter for the eye just built */
+      band_ptr = eye_l ? band_left : band_zero;
+      SMS_setBGScrollX(0);
+      if (eye_l) SMS_enableLineInterrupt(); else SMS_disableLineInterrupt();
+    }
+    if (boss_pal) { SMS_setSpritePaletteColor(12, boss_pal); boss_pal = 0; }
     if (pstate == PL_DYING) death_vblank();
     else {
       field_update();
@@ -2098,9 +2481,16 @@ void play(void) {
     }
     hud_flush();
     msg_flush();
+    vdp_busy = 0;
   }
+  if (g3d) {
+    SMS_disableLineInterrupt();
+    SMS_setBGScrollX(0);
+  }
+  eye_l = 0;
   PSGStop(); PSGSFXStop();
   if (demo) { demo = 0; return; }
+  if (won) ending();
   for (i = 0; i < 6; i++) {
     if (score[i] > hiscore[i]) {
       for (i = 0; i < 6; i++) hiscore[i] = score[i];
@@ -2118,8 +2508,8 @@ void main(void) {
   SMS_useFirstHalfTilesforSprites(0);
   SMS_setSpriteMode(SPRITEMODE_TALL);
   SMS_autoSetUpTextRenderer();
-  SMS_loadTiles(field_tiles, FIELD_BASE, sizeof(field_tiles));
-  SMS_loadTiles(sprite_tiles, 256, sizeof(sprite_tiles));
+  load_tiles_b3(field_tiles, FIELD_BASE, sizeof(field_tiles));
+  load_tiles_b3(sprite_tiles, 256, sizeof(sprite_tiles));
   for (i = 0; i < 16; i++) SMS_setBGPaletteColor(i, 0);
   SMS_setBGPaletteColor(1, RGB(3,3,3));
   SMS_setBGPaletteColor(14, RGB(3,3,0));
