@@ -538,6 +538,13 @@ with open(sys.argv[1], 'w') as f:
         rr = max(0.0, min(223.0, rel_of_y(8*(3*g + 1) + 4)))
         bands[g] = (-int(round(PSCALE*(1 - kp(rr))))) & 255
     f.write(carr('band_left', bands))
+    # every-row version (used while a message is on row 11): the message row
+    # floats 3 px in front of the screen instead of sitting in the field's band
+    rows = [0]*25
+    for r in range(3, 24): rows[r] = bands[r // 3]
+    f.write(carr('rows_left', rows))
+    rows[11] = 3
+    f.write(carr('rows_left_msg', rows))
     print("3D parallax: horizon %d px, bottom %d px" % (par[223], par[0]), file=sys.stderr)
     f.write(carr('rxw', [2 + (x*43)//256 for x in range(256)]))
     f.write(carr('ylut', ylut))

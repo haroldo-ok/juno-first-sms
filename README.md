@@ -79,24 +79,33 @@ The game supports the SegaScope 3-D glasses. Select **3-D GLASSES: ON** on the
 title screen with left/right. Frames then alternate between the left and
 right eye, with the shutters switched in sync:
 
-- Enemies, shots, particles and the astronaut are drawn with a sideways offset
-  that depends on their depth. Things near the horizon sit about 5 px "behind"
-  the screen, your ship's row is at the screen plane, and the strip below
-  your ship comes slightly out of it.
-- The field itself has depth too. On left-eye frames a line interrupt
+- The field recedes into the screen. On left-eye frames a line interrupt
   re-scrolls the background every 24 scanlines, so each band of the floor sits
-  at its own depth. The HUD and radar stay flat at the screen plane.
-- Each eye gets 30 images a second, as in Sega's own 3-D games, and the
-  picture flickers without the glasses.
+  at its own depth, up to about 5 px behind the screen at the horizon.
+- Enemies, shots, particles, the astronaut and the bosses are offset by their
+  depth on the same scale.
+- Your ship floats 2 px in front of the screen.
+- Mid-screen messages ("WAVE 10", "GAME OVER") float 3 px in front. While one is
+  showing, the line interrupt runs every 8 scanlines so the message row gets
+  its own scroll.
+- The HUD and radar stay at the screen plane.
+- Each eye gets 30 images a second, as in Sega's own 3-D games, so the picture
+  flickers without the glasses.
 
-I couldn't confirm from any source which value of the glasses' bit opens
-which eye. The game opens the left eye with bit 0 = 0 (the convention of the
-Famicom's equivalent glasses, which take the same signal). If the depth looks
-inside out (the horizon in front, your ship behind), choose **ON SWAPPED**.
+**Eye order** has been confirmed on real hardware (a Mark III with the 3-D
+adaptor): a write of bit 0 = 1 to `$FFF8` opens the left shutter, and **ON**
+uses that. **ON SWAPPED** is the reverse, for setups that behave the other way.
 
-Hardware note: the glasses register sits at `$FFF8` in the RAM mirror, so each
-write also lands in RAM at `$DFF8`. The stack starts at `$DFF0` and game data
-ends near `$C6C0`, so nothing uses that byte.
+Hardware notes:
+
+- The glasses register sits at `$FFF8` in the RAM mirror, so each write also
+  lands in RAM at `$DFF8`. The stack starts at `$DFF0` and game data ends near
+  `$C6C0`, so nothing uses that byte.
+- A tester found that the glasses worked on a Mark III with the 3-D adaptor
+  but not through the built-in 3-D port of a Japanese Master System (MK-2000),
+  both with a Master Everdrive 1.1. It isn't known yet whether commercial 3-D
+  games work in that MK-2000 setup; if they don't either, the cause is
+  outside this game.
 
 ## What's in it
 
@@ -180,8 +189,12 @@ input and check game variables:
   ending (no wave 51), and a button returns to the title with the high score
   kept.
 - `glasses.in`: 3-D mode. The title option cycles, the shutter value (read back
-  through the RAM mirror at `$DFF8`) alternates every frame, the line interrupt
-  fires 8 times per left-eye frame, and the frame rate holds.
+  through the RAM mirror at `$DFF8`) alternates every frame, and the line
+  interrupt fires every 8 lines while a message is showing and 8 times per
+  left-eye frame otherwise. The frame rate holds.
+  (Note for screenshot-based checks: `smstest` ends a frame after VBlank, so a
+  screenshot combines the scroll values of the frame just shown with the
+  sprites already uploaded for the next frame. Compare like with like.)
 - `stereo.in`: with a `-DSTEREODBG` build, snapshots the finished sprite list
   each frame so a script can confirm every enemy is offset by its depth's
   parallax on left-eye frames and not offset on right-eye frames.
@@ -237,6 +250,3 @@ scaling and a sprite limiter don't fit in C alone, so:
   fights run at 93–98% speed.
 - Enemy flight patterns, scoring and wave structure are my interpretation of
   the arcade game, not a measured reproduction.
-- 3-D mode was verified in the emulator only (shutter writes, per-band scroll,
-  sprite offsets, and a red/cyan anaglyph of a frame pair). It hasn't been
-  viewed through real glasses, and the eye order is a best guess (see above).

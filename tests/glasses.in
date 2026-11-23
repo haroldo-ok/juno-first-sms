@@ -28,7 +28,16 @@ print 0xDFF8 w1
 echo [3] in game: line interrupts drive per-row scroll, shutter alternates
 tap 1
 waituntil game_state == 1 60 w1
+run 10
+echo     while "WAVE 01" shows, its row gets its own band (an IRQ every 8 lines)
+expect msg_on == 1 w1
+poke stat_lineirq 0
+run 60
+expect stat_lineirq >= 700
+print stat_lineirq
 waituntil phase == 1 200 w1
+run 2
+expect msg_on == 0 w1
 poke stat_lineirq 0
 run 100
 expect stat_lineirq >= 390

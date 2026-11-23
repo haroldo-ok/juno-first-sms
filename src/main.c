@@ -111,12 +111,17 @@ u8 burst_col;                  /* ship explosion: screen column of its centre */
 /* SegaScope 3-D glasses: register at $FFF8 (bit 0 picks the open shutter);
  * writes also land in RAM at $DFF8, which nothing else uses (stack starts at $DFF0) */
 #define GLASSES (*(volatile u8 *)0xFFF8)
+/* shutter value for frame f: confirmed on a Mark III, bit 0 = 1 opens the left
+ * eye on even frames (left-eye frames); "ON SWAPPED" inverts it */
+#define GLASS_VAL(f) (((f) & 1) ^ (g3d == 1))
 u8 g3d;                        /* 0 off, 1 on, 2 on with eyes swapped */
 u8 eye_l;                      /* frame being built is for the left eye (3D on) */
 u8 band_i;                     /* line-interrupt band counter (reset each frame) */
 volatile u8 vdp_busy;          /* main loop is streaming to VRAM: line IRQ must not touch the VDP */
-const u8 *band_ptr;            /* per-row scroll table for the frame on screen */
-const u8 band_zero[9] = {0};
+const u8 *band_ptr;            /* per-band/per-row scroll table for the frame on screen */
+u8 band_n;                     /* entries in it: 9 (every 24 lines) or 25 (every 8) */
+u8 msg_on;                     /* text on row 11 (wave / game over message) */
+const u8 band_zero[25] = {0};
 u16 stat_lineirq;
 
 /* boss (every 10th wave; wave 50 is the final one, then the ending) */
@@ -239,7 +244,7 @@ void frame_interrupt(void) {
 void line_interrupt(void) {
   u8 i = ++band_i;
   stat_lineirq++;
-  if (i < 9 && !vdp_busy) INLINE_SMS_setBGScrollX(band_ptr[i]);
+  if (i < band_n && !vdp_busy) INLINE_SMS_setBGScrollX(band_ptr[i]);
 }
 
 void sfx(const u8 *d, u8 ch, u8 prio) {
@@ -1302,6 +1307,7 @@ void msg_flush(void) {
   u8 n;
   const char *s;
   if (msg_state == 1) {
+    msg_on = 1;
     draw_field_row(11);
     for (n = 0, s = msg_text; *s; s++) n++;
     print_at((32 - n) >> 1, 11, msg_text);
@@ -1310,6 +1316,7 @@ void msg_flush(void) {
       SMS_setTile((u16)(wave / 10 + 16)); SMS_setTile((u16)(wave % 10 + 16));
     }
   } else if (msg_state == 2) {
+    msg_on = 0;
     draw_field_row(11);
   }
   msg_state = 0;
@@ -2275,7 +2282,7 @@ void begin_sprites(void) {
   n_spr = 0;
   if (pstate == PL_ALIVE) {
     if (!(invuln & 2)) {
-      draw16(px, PLAYER_Y, SPR_PLAYER + ((pvz > 0 && (keys & PORT_A_KEY_UP) && (frame & 2)) ? 4 : 0));
+      draw16(eye_l ? px + 2 : px, PLAYER_Y, SPR_PLAYER + ((pvz > 0 && (keys & PORT_A_KEY_UP) && (frame & 2)) ? 4 : 0));
       band_add(PLAYER_Y, 2);
     }
   }
@@ -2461,7 +2468,7 @@ void title(void) {
       print_3d_option();
       idle = 0;
     }
-    if (g3d) GLASSES = (frame & 1) ^ (g3d == 2);
+    if (g3d) GLASSES = GLASS_VAL(frame);
     if (pressed & PORT_A_KEY_1) break;
     if (++idle == 600) { demo = 1; demo_timer = 2400; break; }
   }
@@ -2516,7 +2523,7 @@ void ending(void) {
     SMS_finalizeSprites();
     SMS_waitForVBlank();
     SMS_copySpritestoSAT();
-    if (g3d) GLASSES = (frame & 1) ^ (g3d == 2);
+    if (g3d) GLASSES = GLASS_VAL(frame);
     field_update();
     if (t % 150 == 0 && line < 7) {                      /* one line of text at a time */
       if (line < 4) print_centered(end_row[line], end_text[line]);
@@ -2565,13 +2572,13 @@ void play(void) {
   px = 128; pxf = 0x8000u; pvx = 0; pvz = 0; pstate = PL_ALIVE; invuln = 60; fire_cd = 0;
   bonus_timer = 0; astro_cd = 6;
   line_col = COL_LINE; line_dirty = 1;
-  msg_state = 0; sfx_prio = 0; music_on = 0; cur_track = 0;
+  msg_state = 0; msg_on = 0; sfx_prio = 0; music_on = 0; cur_track = 0;
   n_vis = 0;
   radar_static();
   start_wave();
   game_state = ST_PLAY;
   hud_dirty = 0xFF; hud_flush(); msg_flush();
-  band_ptr = band_zero;
+  band_ptr = band_zero; band_n = 9;
   vdp_busy = 0;
   if (g3d) {
     SMS_setLineInterruptHandler(&line_interrupt);
@@ -2588,7 +2595,7 @@ void play(void) {
       PSGStop(); PSGSFXStop();
       for (;;) {
         SMS_waitForVBlank();
-        if (g3d) GLASSES = (++frame & 1) ^ (g3d == 2);
+        if (g3d) GLASSES = GLASS_VAL(++frame);
         if (SMS_queryPauseRequested()) { SMS_resetPauseRequest(); break; }
       }
       if (music_on) PSGResume();
@@ -2626,8 +2633,14 @@ void play(void) {
 #endif
     SMS_copySpritestoSAT();
     if (g3d) {
-      GLASSES = (frame & 1) ^ (g3d == 2);  /* open the shutter for the eye just built */
-      band_ptr = eye_l ? band_left : band_zero;
+      GLASSES = GLASS_VAL(frame);  /* open the shutter for the eye just built */
+      if (msg_on || demo == 1) {       /* row 11 text: every-row bands, text in front */
+        band_ptr = eye_l ? rows_left_msg : band_zero; band_n = 25;
+        SMS_setLineCounter(7);
+      } else {
+        band_ptr = eye_l ? band_left : band_zero; band_n = 9;
+        SMS_setLineCounter(23);
+      }
       SMS_setBGScrollX(0);
       if (eye_l) SMS_enableLineInterrupt(); else SMS_disableLineInterrupt();
     }
