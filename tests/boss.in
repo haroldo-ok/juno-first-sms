@@ -39,9 +39,12 @@ expect boss_st == 1 w1
 expect boss_lv == 1 w1
 expect boss_hp == 24 w1
 expect groups_left == 0 w1
+expect warps == 1 w1
 run 60
 screenshot shots/b0_intro.ppm
 waituntil phase == 1 200 w1
+expect boss_up_n == 0 w1
+expect cur_track == 2 w1
 poke lives 5 w1
 echo [2] it closes in and holds its distance
 poke invuln 250 w1
@@ -382,10 +385,14 @@ print boss_hp w1
 screenshot shots/b2_hit.ppm
 
 echo [5] destroying it pays 5,000 and moves on to wave 11
-print {score+2} w1
-print {score+3} w1
+poke {score+1} 0 w1
+poke {score+2} 9 w1
+poke {score+3} 8 w1
+poke {score+4} 0 w1
+poke lives 3 w1
 poke boss_hp 1 w1
 poke invuln 250 w1
+poke demo 2 w1
 waituntil boss_st == 2 400 w1
 poke demo 0 w1
 run 40
@@ -395,5 +402,9 @@ run 2
 expect boss_wave == 0 w1
 expect boss_st == 0 w1
 expect en_count >= 16 w1
+print {score+1} w1
 print {score+2} w1
-print {score+3} w1
+expect {score+1} == 1 w1
+expect warps == 1 w1
+run 130
+expect cur_track == 1 w1

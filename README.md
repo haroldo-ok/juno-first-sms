@@ -17,9 +17,8 @@ emulator, and a player has reported it working on a Mark III.
 | D-pad up      | Thrust forward (the ship coasts for seconds when released) |
 | D-pad down    | Brake / reverse                                           |
 | Button 1      | Fire: one shot per press, no auto-fire                    |
-| Button 2      | Warp to a random spot (once per life)                     |
+| Button 2      | Warp: emergency escape (see below)                        |
 | Pause         | Pause                                                     |
-| Button 2 on the title screen | Choose the soundtrack: GROWL (arcade style) or SONG (melodic) |
 | Left/right on the title screen | 3-D glasses: OFF, ON, or ON SWAPPED |
 
 Fly over the perspective field and destroy every formation to clear the
@@ -29,13 +28,28 @@ at you, peel off to dive at you, and loop back to their place in the
 formation. Formations that you leave behind turn round and come back.
 
 There are **50 waves**, and the game gets harder all the way: more and faster
-enemies, more shots and more divers. **Every tenth wave is a boss**: a
-mothership approaches from far ahead (watch the radar), then holds its
-distance in front of you, sweeping sideways and firing aimed spreads. It
-launches escort formations and, from the third boss on, lunges closer now and
-then. Its health shows on the HUD. Each boss is tougher and a different
-colour. Wave 50's crimson mothership is the final one: it fires 5-way spreads
-and takes 72 hits. Destroy it to see the ending.
+enemies, more shots and more divers. **Every tenth wave is a boss**. It
+approaches from far ahead (watch the radar), then holds its distance in front
+of you, sweeping sideways and firing aimed spreads. It launches escort
+formations and, from the third boss on, lunges closer now and then. Its health
+shows on the HUD. Each boss is bigger than the last and keeps the previous
+one's parts while adding new ones:
+
+| Wave | Boss        | Size  | New parts                              | Hits |
+|------|-------------|-------|----------------------------------------|------|
+| 10   | Scout       | 24×16 | hull, dome, core                       | 24   |
+| 20   | Raider      | 32×24 | engine pods, running lights            | 32   |
+| 30   | Destroyer   | 40×32 | dorsal fins, three cannons; lunges     | 40   |
+| 40   | Dreadnought | 48×40 | antenna mast, armour plates, 5 cannons | 48   |
+| 50   | Mothership  | 48×48 | wing arrays, spikes, big core; 5-way spreads | 72 |
+
+The bigger bosses also hover closer to you. Destroy the wave-50 Mothership
+to see the ending.
+
+**Warp** is an emergency escape: it jumps you a random distance ahead with a
+moment of invulnerability, and clears every enemy shot in the air. You get
+one per wave; it refills at the start of every wave and whenever you lose a
+ship.
 
 - **Radar** (top centre): the box shows depth from just behind you (bottom)
   to far ahead (top); the orange ticks on each side mark the part that is on
@@ -49,8 +63,13 @@ and takes 72 hits. Destroy it to see the ending.
   scores 10, and destroying one scores 5,000 times its number (5,000 for the
   wave-10 boss up to 25,000 for the final one). The ending adds 10,000 for
   every ship you have left.
-- **Ships**: you start with 3. Extra ships at 20,000 and then every 60,000,
-  holding at most 5. You get one warp per life.
+- **Ships**: you start with 3 and get an extra ship every 100,000 points, with no
+  practical limit (the counter goes to 99). A full game played well scores
+  roughly 1–1.4 million, so that's about 10–13 extra ships over the 50 waves.
+- **Score** has seven digits (up to 9,999,999).
+- **Music**: the melodic song plays during normal waves and the menacing growl
+  during boss fights. The Toccata opening plays at the start and the song again
+  in the ending.
 - **Attract mode**: leave the title screen alone for 10 seconds and the
   game plays itself; press any button to return.
 
@@ -89,8 +108,8 @@ ends near `$C6C0`, so nothing uses that byte.
   three sizes with distance.
 - **Inertia**: thrust builds speed gradually and the ship keeps gliding when
   you let go; stopping takes a deliberate brake.
-- **Bosses and an ending**, which the arcade game doesn't have: five
-  motherships (drawn in three sizes for distance) and an ending sequence where
+- **Bosses and an ending**, which the arcade game doesn't have: five bosses of
+  growing size and detail, and an ending sequence where
   the field races past, your ship flies off towards the horizon and fireworks
   burst overhead.
 - **Williams-style effects**: dashed laser shots; enemies burst into eight
@@ -127,11 +146,18 @@ rather than the generated files:
   tune and all SFX, written straight to PSGlib's stream format. The sound
   data lives in ROM bank 2, which stays mapped for the whole game.
 
-ROM layout: banks 0–1 hold code and the tables used every frame; bank 2 holds
-the music and SFX and is normally mapped in slot 2; bank 3 (`src/gfxbank.c`)
-holds the bulk tile graphics. Those are only needed when VRAM is (re)loaded,
-so `load_tiles_b3()` maps bank 3 briefly, and the frame interrupt skips the
-music player meanwhile.
+ROM layout: banks 0–1 hold code and the tables used every frame. Bank 2 holds
+the music, SFX and the five bosses' tiles (`src/bossgfx.c`), and stays mapped
+in slot 2. Only the current boss is in VRAM: its tiles stream into a 40-tile
+sprite slot, 4 per frame during VBlank, while the wave's title is showing.
+Bank 3 (`src/gfxbank.c`) holds the bulk tile graphics. Those are only needed
+when VRAM is (re)loaded, so `load_tiles_b3()` maps bank 3 briefly, and the
+frame interrupt skips the music player meanwhile.
+
+Link order matters: `ihx2sms` keeps only the first run of records for each
+bank, so every object that goes into bank 2 must be linked before anything in
+bank 3. `tests/check_rom.py` (part of `make playtest`) compares every banked
+array in the finished ROM with its source, so a dropped bank shows up at once.
 
 ## Testing
 
@@ -144,9 +170,12 @@ input and check game variables:
   → back to the title. `tests/mkplaytest.py` resolves `{symbol+offset}` pokes
   into addresses from `junofirst.noi`.
 - `demo.txt`: attract mode starts on its own and a button cancels it.
-- `boss.in`: wave 10 brings the boss. It closes in and holds its distance,
-  fires, launches escorts and takes damage, the frame rate holds during the
-  fight, and destroying it pays 5,000 and starts wave 11.
+- `boss.in`: wave 10 brings the boss. Its tiles finish uploading, the growl
+  plays, and the boss closes in and holds its distance. It fires, launches
+  escorts and takes damage, the frame rate holds during the fight, and
+  destroying it pays 5,000 and starts wave 11, with the song back and the warp
+  refilled.
+- `playtest.in` also checks that crossing 100,000 awards a ship.
 - `ending.in`: the wave-50 boss is the final one. Destroying it plays the
   ending (no wave 51), and a button returns to the title with the high score
   kept.
@@ -202,11 +231,10 @@ scaling and a sprite limiter don't fit in C alone, so:
   and about 20 on screen with constant firing to roughly 50% (`tests/load24.in`
   pins three formations on screen to reproduce this). The 8-sprites-per-line
   limit is never exceeded.
-- Difficulty is tuned against the built-in autopilot, which dodges shots
-  perfectly. It now reaches about wave 10 in two minutes, usually loses its
-  last ship somewhere between waves 10 and 15, and can beat the first boss. Nobody
-  has played a full 50-wave game yet, so the late waves and the later bosses
-  may need adjusting (`start_wave()` and `start_boss()`).
+- Difficulty is tuned against the built-in autopilot and one player's full
+  clear on a Mark III (with a rapid-fire pad), which found it well balanced.
+  Kept alive, the autopilot finishes all 50 waves in about 22 minutes. The boss
+  fights run at 93–98% speed.
 - Enemy flight patterns, scoring and wave structure are my interpretation of
   the arcade game, not a measured reproduction.
 - 3-D mode was verified in the emulator only (shutter writes, per-band scroll,

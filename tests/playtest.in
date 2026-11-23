@@ -28,8 +28,17 @@ poke {div_idx+0} 0 w1
 poke {en+1} 1 w1
 poke {en+5} 128 w1
 poke {en+10} 1920
+poke {score+1} 0 w1
+poke {score+2} 9 w1
+poke {score+3} 9 w1
+poke {score+4} 9 w1
+poke lives 3 w1
 hold 1
-waituntil {score+4} >= 5 60 w1
+waituntil {score+5} >= 5 60 w1
+echo     ... and crossing 100,000 awards a ship
+expect {score+1} == 1 w1
+expect lives == 4 w1
+poke lives 3 w1
 hold none
 expect {bu_t+0} > 0 w1
 run 6

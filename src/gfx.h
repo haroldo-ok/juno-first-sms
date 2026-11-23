@@ -8,10 +8,8 @@
 #define SPR_EBUL 114
 #define SPR_EBUL_S 118
 #define SPR_PART 120
-#define SPR_BOSS_BIG 128
-#define SPR_BOSS_MID 144
-#define SPR_BOSS_FAR 156
-#define SPR_PLAYER_SMALL 160
+#define SPR_BOSS 128
+#define SPR_PLAYER_SMALL 168
 #define FIELD_BASE 96
 #define LOGO_BASE 180
 #define LOGO_W 30
@@ -21,7 +19,7 @@
 #define LOGO_TILES 47
 #define NPHASE 11
 /* in ROM bank 3: only reachable while it is mapped (see load_tiles_b3) */
-extern const unsigned char sprite_tiles[5184];
+extern const unsigned char sprite_tiles[5440];
 extern const unsigned char field_tiles[2688];
 extern const unsigned char logo_tiles[1504];
 extern const unsigned char burst_tiles[1408];
@@ -35,6 +33,30 @@ const unsigned char logo_map[120] = {
   41,0,41,36,39,40,0,0,0,41,0,0,42,43,44,41,
   45,46,42,39,40,0,41,0,
 };
+/* boss L: cols, rows (8x16 sprites), far-image tile offset, tiles, half width px, height px */
+const unsigned char boss_cols[6] = {
+  0,3,4,5,6,6,
+};
+const unsigned char boss_rows[6] = {
+  0,1,2,2,3,3,
+};
+const unsigned char boss_faroff[6] = {
+  0,6,16,20,36,36,
+};
+const unsigned char boss_ntiles[6] = {
+  0,10,20,24,40,40,
+};
+const unsigned char boss_half[6] = {
+  0,12,16,20,24,24,
+};
+const unsigned char boss_height[6] = {
+  0,16,32,32,48,48,
+};
+extern const unsigned char boss_tiles_1[320];
+extern const unsigned char boss_tiles_2[640];
+extern const unsigned char boss_tiles_3[768];
+extern const unsigned char boss_tiles_4[1280];
+extern const unsigned char boss_tiles_5[1280];
 const unsigned char burst_map[672] = {
   43,0,0,38,0,0,0,33,0,0,0,0,31,32,0,29,
   30,0,31,0,31,0,0,0,34,0,0,0,37,0,0,44,

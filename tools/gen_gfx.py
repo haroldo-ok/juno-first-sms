@@ -247,36 +247,88 @@ part = []
 for c in "WYOR":
     part += bullet(["........", "........", "........", "...%s%s..." % (c, c), "...%s%s..." % (c, c)])
 add('SPR_PART', part)
-# ---- boss: a 32x32 mothership, hull in sprite colour 12 (recoloured per boss)
-def boss_art():
-    W = 32
-    g = [[0]*W for _ in range(W)]
+# ---- bosses: five ships, each bigger and with more parts than the last.
+# Hull colour is sprite colour 12, recoloured per boss.  Only the current
+# boss's tiles are in VRAM (uploaded at its wave); all five live in bank 2.
+BOSS_DIM = {1: (24, 16), 2: (32, 24), 3: (40, 32), 4: (48, 40), 5: (48, 48)}
+
+def scale_rect(img, w, h, nw, nh):
+    out = [[0]*nw for _ in range(nh)]
+    for y in range(nh):
+        for x in range(nw):
+            y0 = int(y*h/nh); y1 = max(y0+1, int((y+1)*h/nh))
+            x0 = int(x*w/nw); x1 = max(x0+1, int((x+1)*w/nw))
+            cnt = {}
+            for yy in range(y0, y1):
+                for xx in range(x0, x1):
+                    c = img[yy][xx]; cnt[c] = cnt.get(c, 0) + 1
+            nz = {c: v for c, v in cnt.items() if c}
+            if nz and sum(nz.values())*2 >= sum(cnt.values()):
+                out[y][x] = max(nz.items(), key=lambda kv: kv[1])[0]
+    return out
+
+def boss_ship(lv):
+    W, H = BOSS_DIM[lv]
+    CH = ((H + 15)//16)*16
+    oy = CH - H                                   # art sits on the bottom edge
+    g = [[0]*W for _ in range(CH)]
     def put(x, y, c):
-        if 0 <= x < W and 0 <= y < W: g[y][x] = PAL[c]
+        x = int(x); y = int(y)
+        if 0 <= x < W and 0 <= y < CH: g[y][x] = PAL[c]
     def ellipse(cx, cy, rx, ry, fill, edge=None):
-        for y in range(W):
+        for y in range(CH):
             for x in range(W):
                 d = ((x + .5 - cx)/rx)**2 + ((y + .5 - cy)/ry)**2
-                if d <= 1.0:
-                    put(x, y, edge if (edge and d > 0.72) else fill)
-    for y in range(13, 22):                      # side engine pods
-        for x in list(range(0, 5)) + list(range(27, 32)):
-            put(x, y, 'L' if y in (13, 21) or x in (0, 31) else 'D')
-    for y in (16, 17, 18):
-        put(1, y, 'R'); put(30, y, 'R')
-    ellipse(16, 17, 14.5, 6.5, 'b', 'D')         # main hull
-    ellipse(16, 11.5, 7.5, 6, 'C', 'L')          # dome
-    for x, y in ((12, 8), (13, 7), (14, 7), (12, 9)):
-        put(x, y, 'W')                           # dome highlight
-    ellipse(16, 18, 3.5, 3, 'R', 'O')            # glowing core
-    put(15, 18, 'Y'); put(16, 18, 'Y'); put(16, 17, 'W')
-    for x in range(4, 29, 4):                    # running lights
-        if abs(x - 16) > 4: put(x, 17, 'Y')
-    for cx in (9, 16, 23):                       # underside cannons
-        for y in range(23, 27):
-            put(cx, y, 'L'); put(cx + 1, y, 'D')
-        put(cx, 27, 'O'); put(cx + 1, 27, 'O'); put(cx, 28, 'R')
-    return g
+                if d <= 1.0: put(x, y, edge if (edge and d > 0.7) else fill)
+    cx = W/2
+    hcy = oy + H*0.60; hry = max(3.5, H*0.21)
+    if lv >= 5:                                   # outer wing arrays
+        for x in range(W):
+            for dy in (-1, 0, 1):
+                put(x, hcy + dy, 'D' if dy else 'L')
+        for dy in (-2, -1, 0, 1, 2):
+            put(0, hcy + dy, 'O'); put(W - 1, hcy + dy, 'O')
+    if lv >= 2:                                   # engine pods
+        pw = max(3, int(W*0.1)); ph = max(3, int(H*0.16))
+        for y in range(int(hcy - ph), int(hcy + ph) + 1):
+            for x in list(range(1, 1 + pw)) + list(range(W - 1 - pw, W - 1)):
+                put(x, y, 'L' if y in (int(hcy - ph), int(hcy + ph)) else 'D')
+        put(2, hcy, 'R'); put(W - 3, hcy, 'R')
+    if lv >= 3:                                   # dorsal fins
+        for k in range(int(H*0.2)):
+            for fx in (W*0.22, W*0.78):
+                for dx in range(-(int(H*0.2) - k)//2, (int(H*0.2) - k)//2 + 1):
+                    put(fx + dx, hcy - hry - k + 1, 'L')
+    ellipse(cx, hcy, W/2 - 1.5 if lv >= 2 else W/2 - 0.5, hry, 'b', 'D')       # hull
+    if lv >= 4:                                   # armour plating
+        for x in range(4, W - 4, 6):
+            for y in range(int(hcy - hry + 2), int(hcy + hry - 1)):
+                if g[y][x] == PAL['b']: put(x, y, 'D')
+    ellipse(cx, oy + H*0.36, max(4, W*0.19), max(3, H*0.23), 'C', 'L')       # dome
+    put(cx - 3, oy + H*0.30, 'W'); put(cx - 2, oy + H*0.26, 'W')
+    if lv >= 4:                                   # antenna mast
+        top = int(oy + H*0.36 - max(3, H*0.23))
+        for y in range(max(0, top - 6), top + 1): put(cx - 1, y, 'L')
+        put(cx - 1, max(0, top - 7), 'R'); put(cx - 2, max(0, top - 7), 'R')
+    if lv >= 2:                                   # running lights
+        for x in range(4, W - 4, 4):
+            if abs(x - cx) > W*0.12: put(x, hcy, 'Y' if lv < 5 else 'W')
+    cr = max(1.8, W*(0.07 if lv < 5 else 0.1))
+    ellipse(cx, hcy + 0.5, cr + 0.6, cr, 'R', 'O')                          # core
+    put(cx - 1, hcy, 'Y'); put(cx, hcy, 'Y')
+    if lv >= 5: put(cx - 1, hcy - 1, 'W'); put(cx, hcy - 1, 'W')
+    if lv >= 3:                                   # underside cannons
+        n = 3 if lv == 3 else 5
+        for k in range(n):
+            gx = cx + (k - (n - 1)/2)*W*(0.28 if n == 3 else 0.17)
+            for y in range(int(hcy + hry - 1), int(hcy + hry + H*0.14)):
+                put(gx - 1, y, 'L'); put(gx, y, 'D')
+            put(gx - 1, hcy + hry + H*0.14, 'O'); put(gx, hcy + hry + H*0.14, 'O')
+    if lv >= 5:                                   # ventral spikes
+        for k in range(4):
+            sx = cx + (k - 1.5)*W*0.17
+            for d in range(3): put(sx, CH - 1 - d, 'R' if d == 0 else 'O')
+    return g, W, CH
 
 def blocks(img, cols, rows):
     """tall-sprite blocks: for each row of 16 px, each column of 8 px -> top, bottom tile"""
@@ -286,13 +338,22 @@ def blocks(img, cols, rows):
             out += tile_bytes(cut(img, 8*c, 16*r)) + tile_bytes(cut(img, 8*c, 16*r + 8))
     return out
 
-BOSS = boss_art()
-mid = [[0]*24 for _ in range(32)]
-for y, row in enumerate(scale_any(BOSS, 24, 32)):
-    mid[4 + y] = row
-add('SPR_BOSS_BIG', blocks(BOSS, 4, 2))         # 32x32: 4 cols x 2 rows of 8x16
-add('SPR_BOSS_MID', blocks(mid, 3, 2))          # 24x24 in a 24x32 box: 3 x 2
-add('SPR_BOSS_FAR', spr16(scale_any(BOSS, 16, 32)))  # 16x16: 2 sprites
+boss_data = {}; boss_desc = []
+BOSS_SLOT = 40                                    # VRAM tiles reserved for the current boss
+for lv in range(1, 6):
+    img, W, CH = boss_ship(lv)
+    cols, rows = W//8, CH//16
+    near = blocks(img, cols, rows)
+    fh = max(4, min(16, round(CH*16/W)))
+    far = [[0]*16 for _ in range(16)]
+    for y, row in enumerate(scale_rect(img, W, CH, 16, fh)):
+        far[16 - fh + y] = row
+    data = near + spr16(far)
+    assert len(data)//32 <= BOSS_SLOT, (lv, len(data)//32)
+    boss_data[lv] = data
+    boss_desc.append((cols, rows, len(near)//32, len(data)//32, W//2, CH))
+    globals()['BOSS_IMG_%d' % lv] = img
+add('SPR_BOSS', [0]*(32*BOSS_SLOT))               # uploaded per boss
 add('SPR_PLAYER_SMALL', spr8(scale(PLAYER, 8)))      # for the ending fly-out
 n_sprite_tiles = len(sprite_tiles)//32
 assert n_sprite_tiles <= 192, n_sprite_tiles
@@ -448,6 +509,16 @@ with open(sys.argv[1], 'w') as f:
         for n, d in BANKED:
             fb.write(carr(n, d))
     f.write(carr('logo_map', logo_map))
+    # bosses: descriptors here, tile data in bank 2 (always mapped)
+    f.write("/* boss L: cols, rows (8x16 sprites), far-image tile offset, tiles, half width px, height px */\n")
+    for i, nm in enumerate(('boss_cols', 'boss_rows', 'boss_faroff', 'boss_ntiles', 'boss_half', 'boss_height')):
+        f.write(carr(nm, [0] + [d[i] for d in boss_desc]))
+    for lv in range(1, 6):
+        f.write("extern const unsigned char boss_tiles_%d[%d];\n" % (lv, len(boss_data[lv])))
+    with open(sys.argv[3], 'w') as fb:
+        fb.write("/* generated by tools/gen_gfx.py - do not edit; lives in ROM bank 2 */\n")
+        for lv in range(1, 6):
+            fb.write(carr('boss_tiles_%d' % lv, boss_data[lv]))
     f.write(carr('burst_map', burst_map))
     f.write(carr('field_map', field_map))
     f.write(carr('kptab', kptab))

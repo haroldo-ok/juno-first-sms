@@ -67,15 +67,15 @@ __sfr __at 0x7F PSGPort;
 #define HUD_BOSS  32
 
 #define LAST_WAVE 50
-#define MAX_LIVES 5
+#define MAX_LIVES 99
+#define SCORE_DIGITS 7
 
 #define DEATH_TIME 110
 
 /* ---- game state (file-scope so the test harness can see it) ---- */
 u8 game_state, phase, phase_timer;
 u8 lives, wave, warps;
-u8 score[6], hiscore[6];
-u8 tenk_count, next_extra;
+u8 score[SCORE_DIGITS], hiscore[SCORE_DIGITS];   /* most significant first */
 u16 cam_z;
 u8 px;
 u16 pxf;                       /* player x, 8.8 */
@@ -93,7 +93,7 @@ u16 loops;
 u8 hud_dirty, msg_state;       /* msg_state: 1 = draw pending, 2 = clear pending */
 const char *msg_text;
 u8 cur_phase, line_col, line_dirty;
-u8 sfx_prio, music_on, sound_mode;
+u8 sfx_prio, music_on, cur_track;   /* cur_track: 1 song, 2 growl (boss) */
 u16 keys, oldkeys, pressed;
 u16 rng = 0xACE1;
 u16 stat_degraded, stat_dropped;   /* sprite limiter activity (for tests) */
@@ -123,6 +123,12 @@ u16 stat_lineirq;
 u8 boss_wave, boss_st, boss_lv, boss_x, boss_hp, boss_maxhp, boss_flash, boss_t, boss_rel, boss_dead_t;
 u8 boss_pal;                   /* palette colour to apply in VBlank (0 = none pending) */
 u16 boss_z, boss_fire_cd, boss_spawn_cd;
+const u8 *boss_up_src;          /* boss tiles still to upload (4 per frame, in VBlank) */
+u8 boss_up_n, boss_up_pos;
+u8 boss_hw;                     /* hit half-width in world units (per frame) */
+u8 be_x, be_y, be_cols, be_rows, be_tile, be_cx, be_c, be_r;   /* boss_emit arguments */
+void boss_emit(void);           /* be_cols x be_rows tall sprites from (be_x, be_y), tiles from be_tile */
+const u8 * const boss_src[6] = {0, boss_tiles_1, boss_tiles_2, boss_tiles_3, boss_tiles_4, boss_tiles_5};
 u8 won;                        /* final boss destroyed: play the ending */
 u16 ai_old;                    /* autopilot's previous buttons (for press edges) */
 u8 b3_busy;                    /* ROM bank 3 is mapped in slot 2: music must not run */
@@ -1108,6 +1114,56 @@ _par_x::
     ld   a, #247
     ret
 
+; a block of tall sprites straight into the SMSlib sprite table (caller checks room)
+_boss_emit::
+    ld   a, (_SpriteNextFree)
+    ld   e, a
+    ld   d, #0
+    ld   hl, #_SpriteTableY
+    add  hl, de
+    ld   b, h
+    ld   c, l
+    ld   hl, #_SpriteTableXN
+    add  hl, de
+    add  hl, de
+    ld   a, (_be_y)
+    dec  a
+    ld   (_be_y), a
+    ld   a, (_be_tile)
+    ld   e, a
+    ld   a, (_be_rows)
+    ld   (_be_r), a
+00971$:
+    ld   a, (_be_x)
+    ld   d, a
+    ld   a, (_be_cols)
+    ld   (_be_c), a
+00972$:
+    ld   a, (_be_y)
+    ld   (bc), a
+    inc  bc
+    ld   (hl), d
+    inc  hl
+    ld   (hl), e
+    inc  hl
+    ld   a, d
+    add  a, #8
+    ld   d, a
+    inc  e
+    inc  e
+    ld   a, (_be_c)
+    dec  a
+    ld   (_be_c), a
+    jr   NZ, 00972$
+    ld   a, (_be_y)
+    add  a, #16
+    ld   (_be_y), a
+    ld   a, (_be_r)
+    dec  a
+    ld   (_be_r), a
+    jr   NZ, 00971$
+    ret
+
 ; HL -> (dx,dy) pairs, every other pair is drawn (4 of 8)
 _part_draw::
     ld   a, #4
@@ -1207,20 +1263,22 @@ void draw_radar_frame(void) {
 void put_digits(u8 x, u8 y, const u8 *d) {
   u8 i;
   SMS_setNextTileatXY(x, y);
-  for (i = 0; i < 6; i++) SMS_setTile((u16)(d[i] + 16));
+  for (i = 0; i < SCORE_DIGITS; i++) SMS_setTile((u16)(d[i] + 16));
 }
 
 void draw_boss_bar(void);
 
 void hud_flush(void) {
-  if (hud_dirty & HUD_SCORE) put_digits(7, 0, score);
-  if (hud_dirty & HUD_HI) put_digits(26, 0, hiscore);
+  if (hud_dirty & HUD_SCORE) put_digits(6, 0, score);
+  if (hud_dirty & HUD_HI) put_digits(25, 0, hiscore);
   if (hud_dirty & HUD_WAVE) {
     SMS_setNextTileatXY(28, 1);
     SMS_setTile((u16)(wave / 10 + 16)); SMS_setTile((u16)(wave % 10 + 16));
   }
   if (hud_dirty & HUD_SHIPS) {
-    SMS_setTileatXY(7, 1, (u16)(lives + 16));
+    SMS_setNextTileatXY(7, 1);
+    SMS_setTile(lives >= 10 ? (u16)(lives / 10 + 16) : 0);
+    SMS_setTile((u16)(lives % 10 + 16));
     SMS_setTileatXY(7, 2, (u16)(warps + 16));
   }
   if (hud_dirty & HUD_BOSS) draw_boss_bar();
@@ -1273,23 +1331,20 @@ void field_update(void) {
 
 void inc_digit(u8 i) {
   for (;;) {
+    if (i == 1 && lives < MAX_LIVES) {    /* every 100,000 points: an extra ship */
+      lives++; hud_dirty |= HUD_SHIPS;
+      sfx(sfx_extra, SFX_CHANNEL2, 4);
+    }
     if (++score[i] < 10) break;
     score[i] = 0;
-    if (i == 2) {                 /* carry into the ten-thousands digit */
-      if (++tenk_count == next_extra) {   /* extra ship at 20,000, then every 60,000 */
-        next_extra += 6;
-        if (lives < MAX_LIVES) { lives++; hud_dirty |= HUD_SHIPS; }
-        sfx(sfx_extra, SFX_CHANNEL2, 4);
-      }
-    }
     if (!i) break;
     i--;
   }
 }
 
 void add_score(u8 hundreds, u8 tens) {
-  while (tens--) inc_digit(4);
-  while (hundreds--) inc_digit(3);
+  while (tens--) inc_digit(SCORE_DIGITS - 2);
+  while (hundreds--) inc_digit(SCORE_DIGITS - 3);
   hud_dirty |= HUD_SCORE;
 }
 
@@ -1537,8 +1592,9 @@ void update_player(void) {
         }
       }
     }
-    if ((pressed & PORT_A_KEY_2) && warps) {
+    if ((pressed & PORT_A_KEY_2) && warps) {   /* emergency escape: jump ahead, shots cleared */
       warps--; hud_dirty |= HUD_SHIPS;
+      for (i = 0; i < MAX_EB; i++) eb_st[i] = 0;
       pstate = PL_WARP; ptimer = 30;
       sfx(sfx_warp, SFX_CHANNEL2, 3);
     }
@@ -1862,23 +1918,113 @@ void update_pbullets(void) __naked {
   __endasm;
 }
 
-void update_ebullets(void) {
-  static u8 i, rel, xh, d;
-  static u16 dz;
-  for (i = 0; i < MAX_EB; i++) {
-    if (!eb_st[i]) continue;
-    eb_x[i] += eb_vx[i];
-    eb_z[i] -= eb_spd;
-    xh = (u8)(eb_x[i] >> 8);
-    dz = eb_z[i] - cam_z;
-    if (dz >= VIS_Z || xh < 6 || xh > 250) { eb_st[i] = 0; continue; }
-    rel = (u8)(dz >> 4);
-    if (rel < 4) { eb_st[i] = 0; continue; }
-    if (rel >= PLAYER_REL - 4 && rel <= PLAYER_REL + 4) {
-      d = xh > px ? xh - px : px - xh;
-      if (d < 6 && pstate == PL_ALIVE && !invuln) { stat_shot++; kill_player(); eb_st[i] = 0; }
-    }
-  }
+u8 eu_xh;
+void eb_hit_player(u8 i) {
+  stat_shot++; kill_player(); eb_st[i] = 0;
+}
+
+/* enemy shots: move, retire off screen / past the player, test against the ship */
+void update_ebullets(void) __naked {
+  __asm
+    ld   c, #0
+01001$:
+    ld   b, #0
+    ld   hl, #_eb_st
+    add  hl, bc
+    ld   a, (hl)
+    or   a, a
+    jp   Z, 01090$
+    ld   hl, #_eb_vx
+    add  hl, bc
+    add  hl, bc
+    ld   e, (hl)
+    inc  hl
+    ld   d, (hl)
+    ld   hl, #_eb_x
+    add  hl, bc
+    add  hl, bc
+    ld   a, (hl)
+    add  a, e
+    ld   (hl), a
+    inc  hl
+    ld   a, (hl)
+    adc  a, d
+    ld   (hl), a
+    ld   (_eu_xh), a
+    ld   hl, #_eb_z
+    add  hl, bc
+    add  hl, bc
+    ld   a, (_eb_spd)
+    ld   e, a
+    ld   a, (hl)
+    sub  a, e
+    ld   (hl), a
+    ld   e, a
+    inc  hl
+    ld   a, (hl)
+    sbc  a, #0
+    ld   (hl), a
+    ld   d, a
+    ex   de, hl
+    ld   de, (_cam_z)
+    or   a, a
+    sbc  hl, de
+    ld   a, h
+    cp   a, #0x0E
+    jr   NC, 01080$
+    ld   a, (_eu_xh)
+    cp   a, #6
+    jr   C, 01080$
+    cp   a, #251
+    jr   NC, 01080$
+    ld   a, l
+    rrca
+    rrca
+    rrca
+    rrca
+    and  a, #0x0F
+    ld   e, a
+    ld   a, h
+    add  a, a
+    add  a, a
+    add  a, a
+    add  a, a
+    or   a, e
+    cp   a, #4
+    jr   C, 01080$
+    sub  a, #PLAYER_REL - 4
+    cp   a, #9
+    jr   NC, 01090$
+    ld   a, (_pstate)
+    or   a, a
+    jr   NZ, 01090$
+    ld   a, (_invuln)
+    or   a, a
+    jr   NZ, 01090$
+    ld   a, (_eu_xh)
+    ld   hl, #_px
+    sub  a, (hl)
+    jr   NC, 01010$
+    neg
+01010$:
+    cp   a, #6
+    jr   NC, 01090$
+    push bc
+    ld   a, c
+    call _eb_hit_player
+    pop  bc
+    jr   01090$
+01080$:
+    ld   hl, #_eb_st
+    add  hl, bc
+    ld   (hl), #0
+01090$:
+    inc  c
+    ld   a, c
+    cp   a, #MAX_EB
+    jp   C, 01001$
+    ret
+  __endasm;
 }
 
 void update_astro(void) {
@@ -1906,6 +2052,7 @@ void update_astro(void) {
 }
 
 void start_boss(void);
+void start_music(void);
 
 void start_wave(void) {
   u8 w = wave;
@@ -1920,16 +2067,19 @@ void start_wave(void) {
   g_speed = 5 + w / 5;
   dive_vz = -(g_speed + 18);
   spawn_cd = 0;
-  hud_dirty |= HUD_WAVE;
+  warps = 1;                           /* the warp is refilled every wave */
+  hud_dirty |= HUD_WAVE | HUD_SHIPS;
   boss_wave = (w % 10 == 0);
   if (boss_wave) {
     groups_left = 0; grp_max = 1;         /* one escort formation at a time */
     if (bonus_timer) { bonus_timer = 0; line_col = COL_LINE; line_dirty = 1; }
     show_msg("WAVE 00 - BOSS");
     start_boss();
+    if (music_on) start_music();         /* switch to the boss music right away */
     return;
   }
   show_msg("WAVE 00");
+  if (music_on) start_music();           /* back to the song after a boss */
   /* the first formations are already on their way (watch the radar) */
   spawn_group(360);
   spawn_group(520);
@@ -1937,9 +2087,12 @@ void start_wave(void) {
 }
 
 void start_music(void) {
-  if (music_on || demo == 1) return;
-  PSGPlay((void *)(sound_mode ? mus_game : mus_growl));
-  music_on = 1;
+  u8 want = boss_wave ? 2 : 1;           /* the song for waves, the growl for bosses */
+  if (demo == 1) return;
+  if (music_on && cur_track == want) return;
+  PSGStop();
+  PSGPlay((void *)(want == 2 ? mus_growl : mus_game));
+  music_on = 1; cur_track = want;
 }
 
 void update_phase(void) {
@@ -1975,6 +2128,9 @@ void start_boss(void) {
   boss_spawn_cd = 240;
   boss_rel = 255;
   boss_pal = boss_col[boss_lv];
+  boss_up_src = boss_src[boss_lv]; boss_up_n = boss_ntiles[boss_lv]; boss_up_pos = 0;
+  /* sprite half-width in world units at its hover distance, for hits */
+  boss_hw = (u8)(((u16)boss_half[boss_lv] * (150 + 149 - boss_lv * 9)) / 175) + 2;
   hud_dirty |= HUD_BOSS;
   sfx(sfx_warp, SFX_CHANNEL2, 4);
 }
@@ -2017,8 +2173,8 @@ void update_boss(void) {
   r = (s16)(boss_z - cam_z) >> 4;
   if (boss_st == 1) {
     /* depth: close in to ~140 units, then hold that distance whatever the player does */
-    target = 140 + ((s8)sin4[boss_t] >> 2);
-    if (boss_lv >= 3 && (boss_t & 0xC0) == 0xC0) target = 90;   /* lunges closer now and then */
+    target = 149 - boss_lv * 9 + ((s8)sin4[boss_t] >> 2);    /* bigger bosses come closer */
+    if (boss_lv >= 3 && (boss_t & 0xC0) == 0xC0) target = 80;   /* lunges closer now and then */
     corr = ((s16)target - r) << 1;
     lim = 10 + (boss_lv << 1);
     if (corr > lim) corr = lim; else if (corr < -(s16)lim) corr = -(s16)lim;
@@ -2040,7 +2196,7 @@ void update_boss(void) {
   } else {                                      /* exploding */
     boss_z += pvz;
     if (!(boss_t & 7)) {
-      spawn_burst(boss_x - 24 + (rand8() % 49), boss_z + ((u16)(rand8() & 15) << 4), boss_dead_t > 50);
+      spawn_burst(boss_x - boss_half[boss_lv] + (rand8() % (boss_half[boss_lv] * 2 + 1)), boss_z + ((u16)(rand8() & 15) << 4), boss_dead_t > 50);
       sfx(sfx_boom, SFX_CHANNEL3, 3);
     }
     if (++boss_dead_t >= 100) { boss_finish(); return; }
@@ -2052,7 +2208,7 @@ void update_boss(void) {
 void boss_hits(void) {
   u8 i, rel, d, hw;
   if (boss_st != 1 || boss_rel == 255) return;
-  hw = boss_rel < 136 ? 22 : 18;
+  hw = boss_hw;
   for (i = 0; i < MAX_PB; i++) {
     if (!pb_st[i]) continue;
     rel = (u8)((pb_z[i] - cam_z) >> 4);
@@ -2073,11 +2229,13 @@ void boss_hits(void) {
   }
 }
 
-/* 32x32 near, 24x24 mid, 16x16 far; drawn right after the player and enemy shots */
+/* full-size art once it fits under the HUD, a 16x16 far image before that;
+ * drawn right after the player and the enemy shots */
 void draw_boss(void) {
   static u8 rel, sx, cols, rows, c, tile, y0, x, half;
   static u16 dz;
-  if (!boss_st) return;
+  static s16 top;
+  if (!boss_st || boss_up_n) return;                     /* tiles still uploading */
   if (boss_st == 1 && (boss_flash & 2)) return;          /* hit flash */
   if (boss_st == 2 && (boss_dead_t & 2) && boss_dead_t > 60) return;
   dz = boss_z - cam_z;
@@ -2087,15 +2245,19 @@ void draw_boss(void) {
   if (!sx) return;
   if (eye_l) sx = par_x(sx, rel);
   y0 = ylut[rel];
-  if (rel < 136) { cols = 4; rows = 2; tile = SPR_BOSS_BIG; half = 16; y0 -= 24; }
-  else if (rel < 200) { cols = 3; rows = 2; tile = SPR_BOSS_MID; half = 12; y0 -= 22; }
-  else { cols = 2; rows = 1; tile = SPR_BOSS_FAR; half = 8; y0 -= 8; }
-  if (sx < half || sx > 255 - half) return;              /* never wrap round the screen */
-  for (; rows; rows--, y0 += 16) {
-    x = sx - half;
-    for (c = cols; c; c--, x += 8, tile += 2) SMS_addSprite(x, y0, tile);
-    band_add(y0, cols);
+  top = (s16)y0 + 8 - boss_height[boss_lv];
+  if (top >= 24 && rel < 190) {
+    cols = boss_cols[boss_lv]; rows = boss_rows[boss_lv]; half = boss_half[boss_lv];
+    tile = SPR_BOSS; y0 = (u8)top;
+  } else {
+    cols = 2; rows = 1; half = 8; tile = SPR_BOSS + boss_faroff[boss_lv]; y0 -= 8;
   }
+  if (sx < half || sx > 255 - half) return;              /* never wrap round the screen */
+  if (SpriteNextFree + cols * rows > 64) return;
+  be_x = sx - half; be_y = y0; be_cols = cols; be_rows = rows; be_tile = tile;
+  boss_emit();
+  SpriteNextFree += cols * rows;
+  for (; rows; rows--, y0 += 16) band_add(y0, cols);
 }
 
 void draw_boss_bar(void) {
@@ -2215,7 +2377,7 @@ void read_keys(void) {
 }
 
 void draw_hud_frame(void) {
-  print_at(0, 0, " SCORE 000000          HI 000000");
+  print_at(0, 0, "SCORE 0000000         HI 0000000");
   print_at(0, 1, " SHIPS 3               WAVE 01  ");
   print_at(0, 2, " WARP  3                        ");
   draw_radar_frame();
@@ -2262,7 +2424,7 @@ void title(void) {
   SMS_initSprites(); SMS_finalizeSprites(); SMS_copySpritestoSAT();
   load_tiles_b3(logo_tiles, LOGO_BASE, sizeof(logo_tiles));
   for (r = 0; r < 24; r++) draw_field_row(r);
-  print_at(0, 0, " SCORE 000000          HI 000000");
+  print_at(0, 0, "SCORE 0000000         HI 0000000");
   for (r = 0; r < LOGO_H; r++) {
     SMS_setNextTileatXY(0, 4 + r); SMS_setTile(0);
     for (i = 0; i < LOGO_W; i++) SMS_setTile((u16)(LOGO_BASE + logo_map[r * LOGO_W + i]));
@@ -2273,7 +2435,7 @@ void title(void) {
   print_yel(12, 17, "RESCUE = BONUS!");
   print_at(8, 21, "1:FIRE   2:WARP");
   print_at(1, 23, "A TRIBUTE TO KONAMI'S 1983 GAME");
-  print_yel(5, 22, sound_mode ? "BUTTON 2 MUSIC: SONG " : "BUTTON 2 MUSIC: GROWL");
+  print_yel(2, 22, "50 WAVES - A BOSS EVERY 10TH");
   print_3d_option();
   hud_dirty = HUD_SCORE | HUD_HI; hud_flush();
   line_col = COL_LINE; line_dirty = 1;
@@ -2294,8 +2456,6 @@ void title(void) {
       blink ^= 1;
       if (blink) print_at(9, 19, "PUSH BUTTON 1"); else draw_field_row(19);
     }
-    if (pressed & PORT_A_KEY_2) { sound_mode ^= 1; idle = 0; }
-    if (pressed & PORT_A_KEY_2) print_yel(5, 22, sound_mode ? "BUTTON 2 MUSIC: SONG " : "BUTTON 2 MUSIC: GROWL");
     if (pressed & (PORT_A_KEY_LEFT | PORT_A_KEY_RIGHT)) {
       g3d = (pressed & PORT_A_KEY_RIGHT) ? (g3d == 2 ? 0 : g3d + 1) : (g3d == 0 ? 2 : g3d - 1);
       print_3d_option();
@@ -2393,7 +2553,7 @@ void play(void) {
   SMS_loadTiles(radar_buf, RADAR_BASE, sizeof(radar_buf));
   for (i = 0; i < 24; i++) draw_field_row(i);
   draw_hud_frame();
-  for (i = 0; i < 6; i++) score[i] = 0;
+  for (i = 0; i < SCORE_DIGITS; i++) score[i] = 0;
   for (i = 0; i < MAX_EN; i++) en[i].st = 0;
   for (i = 0; i < MAX_PB; i++) pb_st[i] = 0;
   for (i = 0; i < MAX_EB; i++) eb_st[i] = 0;
@@ -2402,11 +2562,10 @@ void play(void) {
   as_st = 0; en_count = 0; n_div = 0; div_idx[0] = div_idx[1] = div_idx[2] = 255;
   boss_st = 0; boss_wave = 0; won = 0; ai_old = 0;
   lives = 3; wave = 1; warps = 1;
-  tenk_count = 0; next_extra = 2;
   px = 128; pxf = 0x8000u; pvx = 0; pvz = 0; pstate = PL_ALIVE; invuln = 60; fire_cd = 0;
   bonus_timer = 0; astro_cd = 6;
   line_col = COL_LINE; line_dirty = 1;
-  msg_state = 0; sfx_prio = 0; music_on = 0;
+  msg_state = 0; sfx_prio = 0; music_on = 0; cur_track = 0;
   n_vis = 0;
   radar_static();
   start_wave();
@@ -2473,6 +2632,11 @@ void play(void) {
       if (eye_l) SMS_enableLineInterrupt(); else SMS_disableLineInterrupt();
     }
     if (boss_pal) { SMS_setSpritePaletteColor(12, boss_pal); boss_pal = 0; }
+    if (boss_up_n) {                   /* stream this boss's tiles into its VRAM slot */
+      i = boss_up_n > 4 ? 4 : boss_up_n;
+      SMS_loadTiles(boss_up_src, 256 + SPR_BOSS + boss_up_pos, (u16)i << 5);
+      boss_up_src += (u16)i << 5; boss_up_pos += i; boss_up_n -= i;
+    }
     if (pstate == PL_DYING) death_vblank();
     else {
       field_update();
@@ -2491,9 +2655,9 @@ void play(void) {
   PSGStop(); PSGSFXStop();
   if (demo) { demo = 0; return; }
   if (won) ending();
-  for (i = 0; i < 6; i++) {
+  for (i = 0; i < SCORE_DIGITS; i++) {
     if (score[i] > hiscore[i]) {
-      for (i = 0; i < 6; i++) hiscore[i] = score[i];
+      for (i = 0; i < SCORE_DIGITS; i++) hiscore[i] = score[i];
       break;
     }
     if (score[i] < hiscore[i]) break;
@@ -2516,7 +2680,7 @@ void main(void) {
   SMS_setBGPaletteColor(15, RGB(3,1,0));
   SMS_loadSpritePalette(spr_pal);
   SMS_setBackdropColor(0);
-  hiscore[1] = 1;                      /* 010000 */
+  hiscore[SCORE_DIGITS - 5] = 1;       /* 10,000 */
   SMS_setFrameInterruptHandler(&frame_interrupt);
   for (;;) {
     title();
