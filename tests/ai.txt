@@ -1,0 +1,41 @@
+symbols junofirst.noi
+run 60
+tap 1
+waituntil phase == 1 300 w1
+poke wave 5 w1
+poke wave_left 0 w1
+waituntil phase == 0 30 w1
+waituntil phase == 1 300 w1
+poke demo 2 w1
+poke loops 0
+poke lives 9 w1
+run 1200
+echo t=1200
+print wave w1
+print lives w1
+print stat_rammed w1
+print stat_shot w1
+run 1200
+echo t=2400
+print wave w1
+print lives w1
+print stat_rammed w1
+print stat_shot w1
+run 1200
+echo t=3600
+print wave w1
+print lives w1
+print stat_rammed w1
+print stat_shot w1
+run 1200
+echo t=4800
+print wave w1
+print lives w1
+print stat_rammed w1
+print stat_shot w1
+run 1200
+echo t=6000
+print wave w1
+print lives w1
+print stat_rammed w1
+print stat_shot w1

@@ -27,8 +27,8 @@ WWLLLLLLLLLLLLWW
 WLLDWWLLLLWWDLLW
 WWWWW.WLLW.WWWWW
 .RR...WWWW...RR.
-.OO....OO....OO.
-.O......O.....O.
+................
+................
 """)
 
 SAUCER = art("""
@@ -228,7 +228,23 @@ def bullet(rows):
     return tile_bytes(img[:8]) + tile_bytes(img[8:])
 
 add('SPR_BLANK', [0]*64)
-add('SPR_PLAYER', spr16(PLAYER) + spr16(swap(PLAYER, {5: 1})))
+add('SPR_PLAYER', spr16(PLAYER))
+
+def flame(side, mid, phase):
+    """three engine jets (x 1-2, 7-8, 13-14), lengths in px; phase flickers the tips"""
+    img = [[0]*16 for _ in range(16)]
+    for (x0, L) in ((1, side), (7, mid), (13, side)):
+        L = max(0, L + (1 if (phase and x0 == 7) else 0) - (1 if (phase and x0 != 7) else 0))
+        for y in range(L):
+            f = y / max(1, L)
+            c = 'W' if f < 0.2 else 'Y' if f < 0.45 else 'O' if f < 0.75 else 'R'
+            w = 2 if f < 0.6 else 1
+            for dx in range(w):
+                xx = x0 + dx + (1 if (w == 1 and (phase ^ (y & 1)) and x0 != 7) else 0)
+                if xx < 16: img[y][xx] = PAL[c]
+    return img
+# small flame (slow forward) and big flame (fast), two flicker frames each
+add('SPR_FLAME', spr16(flame(3, 4, 0)) + spr16(flame(3, 4, 1)) + spr16(flame(7, 11, 0)) + spr16(flame(7, 11, 1)))
 en = []
 for img, sw in ((SAUCER, {4: 6, 5: 4}), (DART, {10: 1, 6: 10}),
                 (SPINNER, {6: 1, 8: 6}), (BOMBER, {4: 1, 6: 4})):
@@ -429,17 +445,19 @@ CX, CY = 128, 158
 burst = {}
 for k in range(11):
     r = 12 + 17*k
-    n = 8 if k == 0 else 16 if k < 3 else 32 if k < 7 else 64
+    n = max(8, int(2*math.pi*r/6))          # evenly spaced all the way round
     for i in range(n):
         a = 2*math.pi*(i + (0.5 if k & 1 else 0))/n
-        x = int(round(CX + r*math.cos(a))) % 256; y = int(round(CY + r*math.sin(a)))
-        if y < 24 or y > 191: continue
+        # 64-column map centred on column 32, so the rings never wrap round
+        # onto the far side of the screen whatever the ship's column
+        x = int(round(256 + r*math.cos(a))); y = int(round(CY + r*math.sin(a)))
+        if y < 24 or y > 191 or x < 0 or x > 511: continue
         cell = (x >> 3, y >> 3)
         if cell in burst: continue
         burst[cell] = 1 + k*4 + ((x >> 2) & 1) + 2*((y >> 2) & 1)
 burst_map = []
 for ty in range(3, 24):
-    for tx in range(32):
+    for tx in range(64):
         burst_map.append(burst.get((tx, ty), 0))
 burst_tiles = []
 for k in range(11):
@@ -464,26 +482,102 @@ F5 = {
  'T': ["XXXXX", "..X..", "..X..", "..X..", "..X..", "..X..", "..X.."],
  ' ': ["....."]*7,
 }
-LW, LH = 30, 4
+# Big title logo: "JUNO" over "FIRST" in thick block letters lying on a plane
+# that tilts back into the distance, so the letters narrow and flatten
+# towards the top (drawn in true perspective, then cut into tiles).
+# Front faces shade from pale yellow to orange (BG colours 2-5), the letters'
+# thickness shows below them in dark reds (6-7), lit edges in 8.  It borrows
+# the BG tiles of the field, starburst and radar (96-255), which the game
+# reloads on start.
+BLK = 8                      # px per font pixel on the flat plane
+EXT = 6                      # letter thickness in px (seen below each letter)
+GAP = 10                     # between the two lines
+LW = 32
+def flat_line(text):
+    w = len(text)*6*BLK - BLK
+    front = [[False]*w for _ in range(7*BLK)]
+    for i, ch in enumerate(text):
+        for fy in range(7):
+            for fx in range(5):
+                if F5[ch][fy][fx] != 'X': continue
+                for yy in range(BLK):
+                    for xx in range(BLK):
+                        front[fy*BLK + yy][i*6*BLK + fx*BLK + xx] = True
+    return front
+F1, F2 = flat_line("JUNO"), flat_line("FIRST")
+FW = max(len(F1[0]), len(F2[0])) + 4
+FH = 7*BLK*2 + GAP + EXT + 2
+front = [[False]*FW for _ in range(FH)]
+for (img, oy) in ((F1, 0), (F2, 7*BLK + GAP)):
+    ox = (FW - len(img[0]))//2
+    for y, row in enumerate(img):
+        for x, v in enumerate(row):
+            if v: front[oy + y][ox + x] = True
+flat = [[0]*FW for _ in range(FH)]
+for y in range(FH):
+    for x in range(FW):
+        if front[y][x]:
+            line_y = y if y < 7*BLK else y - (7*BLK + GAP)
+            c = 2 + min(3, (line_y*4)//(7*BLK))
+            if y == 0 or not front[y-1][x] or x == 0 or not front[y][x-1] or not front[y][x+1]: c = 8
+            flat[y][x] = c
+        else:
+            for d in range(1, EXT + 1):          # thickness below the letter
+                if y - d >= 0 and front[y - d][x]:
+                    flat[y][x] = 6 if d <= EXT//2 else 7
+                    break
+# perspective: flat row v (0 = top = far) sits at depth z = 1 + A*(1 - v)
+A = 0.6
+LH = 12                                        # tile rows
+OH = LH*8 - 2                                  # output height in px
+BOTW = 252.0                                   # width of the near edge
+def zof(v): return 1 + A*(1 - v)
+def sy(v):                                     # screen y of flat row v (0..1)
+    t0 = 1/zof(0)
+    return (1/zof(v) - t0)/(1 - t0)*OH
 logo = [[0]*(LW*8) for _ in range(LH*8)]
-for i, ch in enumerate("JUNO FIRST"):
-    for fy in range(7):
-        col = 1 if fy < 2 else (14 if fy < 5 else 15)
-        for fx in range(5):
-            if F5[ch][fy][fx] == 'X':
-                for yy in range(3):
-                    for xx in range(3):
-                        logo[2 + fy*4 + yy][i*24 + 2 + fx*4 + xx] = col
+SS = 3                                          # supersampling per axis
+for oy in range(LH*8):
+    for ox in range(LW*8):
+        votes = {}
+        for sj in range(SS):
+            yy = oy + (sj + 0.5)/SS
+            if yy >= OH: continue
+            lo, hi = 0.0, 1.0                    # invert sy() by bisection
+            for _ in range(30):
+                mid = (lo + hi)/2
+                if sy(mid) < yy: lo = mid
+                else: hi = mid
+            v = lo; z = zof(v)
+            fy = int(v*FH)
+            if fy >= FH: continue
+            for si in range(SS):
+                xx = ox + (si + 0.5)/SS - 128
+                fx = int(FW/2 + xx*z*FW/BOTW)
+                if 0 <= fx < FW:
+                    c = flat[fy][fx]
+                    votes[c] = votes.get(c, 0) + 1
+        if votes:
+            c, n = max(votes.items(), key=lambda kv: (kv[1], kv[0] != 0))
+            nz = sum(n2 for c2, n2 in votes.items() if c2)
+            if c == 0 and nz*2 >= SS*SS - 1:     # keep thin far strokes
+                c = max(((n2, c2) for c2, n2 in votes.items() if c2))[1]
+            logo[oy][ox] = c
 logo_tiles = []; logo_map = []; seen = {}
+blank = tuple([0]*32)
+seen[blank] = 0; logo_tiles += list(blank)
 for ty in range(LH):
     for tx in range(LW):
         t = tuple(tile_bytes([row[tx*8:tx*8+8] for row in logo[ty*8:ty*8+8]]))
         if t not in seen:
             seen[t] = len(seen); logo_tiles += list(t)
         logo_map.append(seen[t])
-FIELD_BASE = FIELD_BASE_; LOGO_BASE = FIELD_BASE + 84
-BURST_BASE = LOGO_BASE; RADAR_BASE = BURST_BASE + max(48, len(seen))
-assert len(seen) <= 60 and RADAR_BASE + 18 <= 256, RADAR_BASE
+TITLE_BASE = 64            # also reuses the font's unused lower-case slots (64-95)
+print("logo: %d x %d tiles, %d unique" % (LW, LH, len(seen)), file=sys.stderr)
+assert TITLE_BASE + len(seen) <= 256, len(seen)
+FIELD_BASE = FIELD_BASE_; LOGO_BASE = TITLE_BASE
+BURST_BASE = FIELD_BASE + 84; RADAR_BASE = BURST_BASE + 48
+assert RADAR_BASE + 18 <= 256, RADAR_BASE
 
 sintab = [int(round(127*math.sin(2*math.pi*i/256))) for i in range(256)]
 
@@ -545,7 +639,42 @@ with open(sys.argv[1], 'w') as f:
     f.write(carr('rows_left', rows))
     rows[11] = 3
     f.write(carr('rows_left_msg', rows))
+    # 9-band version for messages: the whole band holding row 11 (rows 9-11)
+    # moves 3 px in front, so the scroll change lands above the text
+    mb = list(bands); mb[3] = 3
+    f.write(carr('band_left_msg', mb))
+    # title in 3-D (left eye, 9 bands of 24 lines): the logo (rows 3-14) tilts
+    # from 4 px behind the screen at the top to 2 px in front at the bottom
+    f.write(carr('title_band', [0, (-4) & 255, (-2) & 255, 0, 2, 0, 0, 0, 0]))
     print("3D parallax: horizon %d px, bottom %d px" % (par[223], par[0]), file=sys.stderr)
+    # formation manoeuvres: each shape morphs (m = 0..16) into a second shape and back
+    FDX = [[0]*8, [-28, -20, -12, -4, 4, 12, 20, 28], [28, 20, 12, 4, -4, -12, -20, -28], [0]*8,
+           [-14, 14, -14, 14, -14, 14, -14, 14]]
+    FDZ = [[0, 12, 24, 36, 48, 60, 72, 84]]*4 + [[0, 0, 16, 16, 32, 32, 48, 48]]
+    def target(fm):
+        dx = []; dz = []
+        for k in range(8):
+            if fm == 0:                          # column -> zigzag
+                dx.append(-18 if k & 1 else 18); dz.append(8*k)
+            elif fm in (1, 2):                   # diagonal -> its mirror image (swing)
+                dx.append(-FDX[fm][k]); dz.append(FDZ[fm][k])
+            elif fm == 3:                        # snake -> ring
+                a = 2*math.pi*k/8
+                dx.append(int(round(30*math.cos(a)))); dz.append(int(round(30 + 24*math.sin(a))))
+            else:                                # twin columns -> semicircle fanned out to both sides
+                j = k >> 1
+                a = math.pi/2 + (math.pi/2)*(j + 1)/4 if not (k & 1) else math.pi/2 - (math.pi/2)*(j + 1)/4
+                dx.append(int(round(44*math.cos(a)))); dz.append(int(round(30 - 26*math.sin(a) + 26)))
+        return dx, dz
+    mdx = []; mdz = []
+    for fm in range(5):
+        tdx, tdz = target(fm)
+        for m in range(17):
+            for k in range(8):
+                mdx.append(int(round(FDX[fm][k] + (tdx[k] - FDX[fm][k])*m/16)) & 255)
+                mdz.append(max(0, int(round(FDZ[fm][k] + (tdz[k] - FDZ[fm][k])*m/16))))
+    f.write(carr('morph_dx', mdx))
+    f.write(carr('morph_dz', mdz))
     f.write(carr('rxw', [2 + (x*43)//256 for x in range(256)]))
     f.write(carr('ylut', ylut))
     f.write(carr('sin4', [(v >> 2) & 255 for v in sintab]))

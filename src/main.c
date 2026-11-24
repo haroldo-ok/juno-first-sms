@@ -54,10 +54,17 @@ __sfr __at 0x7F PSGPort;
 
 #define FORM_SNAKE 3
 
-#define COL_LINE  RGB(1,2,3)
-#define COL_BONUS RGB(3,0,0)
-#define COL_RAIL  RGB(0,0,2)      /* static column lines */
-#define COL_RAIL_BONUS RGB(1,0,0)
+/* field colours: green (waves 1-10), yellow, blue, purple, red (41-50),
+ * getting brighter wave by wave within each set of ten */
+const u8 seg_line[5][10] = {
+  {RGB(0,2,0), RGB(0,2,0), RGB(1,2,1), RGB(1,2,1), RGB(0,3,0), RGB(0,3,0), RGB(1,3,1), RGB(1,3,1), RGB(2,3,2), RGB(2,3,2)},
+  {RGB(2,2,0), RGB(2,2,0), RGB(2,2,1), RGB(2,2,1), RGB(3,3,0), RGB(3,3,0), RGB(3,3,1), RGB(3,3,1), RGB(3,3,2), RGB(3,3,2)},
+  {RGB(0,1,2), RGB(0,1,2), RGB(0,1,3), RGB(0,1,3), RGB(1,2,3), RGB(1,2,3), RGB(2,2,3), RGB(2,2,3), RGB(2,3,3), RGB(2,3,3)},
+  {RGB(2,0,2), RGB(2,0,2), RGB(2,1,2), RGB(2,1,2), RGB(3,0,3), RGB(3,0,3), RGB(3,1,3), RGB(3,1,3), RGB(3,2,3), RGB(3,2,3)},
+  {RGB(2,0,0), RGB(2,0,0), RGB(2,1,1), RGB(2,1,1), RGB(3,0,0), RGB(3,0,0), RGB(3,1,1), RGB(3,1,1), RGB(3,2,2), RGB(3,2,2)}};
+const u8 seg_rail[5][2] = {
+  {RGB(0,1,0), RGB(0,2,0)}, {RGB(1,1,0), RGB(2,2,0)}, {RGB(0,0,1), RGB(0,0,2)},
+  {RGB(1,0,1), RGB(2,0,2)}, {RGB(1,0,0), RGB(2,0,0)}};
 
 #define HUD_SCORE 1
 #define HUD_HI    2
@@ -92,7 +99,7 @@ u8 frame;
 u16 loops;
 u8 hud_dirty, msg_state;       /* msg_state: 1 = draw pending, 2 = clear pending */
 const char *msg_text;
-u8 cur_phase, line_col, line_dirty;
+u8 cur_phase, line_col, rail_col, line_dirty;
 u8 sfx_prio, music_on, cur_track;   /* cur_track: 1 song, 2 growl (boss) */
 u16 keys, oldkeys, pressed;
 u16 rng = 0xACE1;
@@ -144,6 +151,8 @@ u8 snap_eye, snap_n, snap_xn[128], snap_st[MAX_EN], snap_rel[MAX_EN], snap_sx[MA
 
 /* formations: each group of 8 flies as a unit, members hold slots */
 u8 g_n[MAX_GRP], g_type[MAX_GRP], g_form[MAX_GRP], g_t[MAX_GRP], g_dir[MAX_GRP], g_base[MAX_GRP];
+u8 g_shape[MAX_GRP];            /* formation shape 0-4 (g_form is 5 while a snake morphs) */
+u8 g_ms[MAX_GRP], g_mm[MAX_GRP], g_mt[MAX_GRP];  /* manoeuvre state, morph step 0-16, timer */
 u16 g_x[MAX_GRP];              /* centre x, 8.8 */
 u8 g_xh[MAX_GRP];
 u16 g_z[MAX_GRP];              /* lead z */
@@ -1247,12 +1256,11 @@ void draw_field_row(u8 r) {
 }
 
 void draw_burst_row(u8 r) {
-  u8 i, c, v;
-  const u8 *m = burst_map + (u16)(r - 3) * 32;
-  c = (u8)(16 - burst_col);
+  u8 i, v;
+  const u8 *m = burst_map + (u16)(r - 3) * 64 + (u8)(32 - burst_col);  /* centre on the ship */
   SMS_setNextTileatXY(0, r);
   for (i = 32; i; i--) {
-    v = m[c & 31]; c++;
+    v = *m++;
     SMS_setTile(v ? (u16)(BURST_BASE - 1 + v) : 0);
   }
 }
@@ -1274,7 +1282,7 @@ void put_digits(u8 x, u8 y, const u8 *d) {
 void draw_boss_bar(void);
 
 void hud_flush(void) {
-  if (hud_dirty & HUD_SCORE) put_digits(6, 0, score);
+  if (hud_dirty & HUD_SCORE) put_digits(7, 0, score);
   if (hud_dirty & HUD_HI) put_digits(25, 0, hiscore);
   if (hud_dirty & HUD_WAVE) {
     SMS_setNextTileatXY(28, 1);
@@ -1327,7 +1335,7 @@ void field_update(void) {
   if (p != cur_phase || line_dirty) {
     if (line_dirty) {
       u8 i; for (i = 2; i < 13; i++) SMS_setBGPaletteColor(i, 0);
-      SMS_setBGPaletteColor(13, line_col == COL_BONUS ? COL_RAIL_BONUS : COL_RAIL);
+      SMS_setBGPaletteColor(13, bonus_timer ? line_col : rail_col);   /* rescue bonus: rails light up */
     }
     SMS_setBGPaletteColor(2 + cur_phase, 0);
     SMS_setBGPaletteColor(2 + p, line_col);
@@ -1686,6 +1694,48 @@ void fire_at_player(u8 i, u8 rel) {
 }
 
 /* each formation follows its own flight path */
+/* write the members' offsets for the formation's current morph step */
+void group_shape(u8 g) {
+  u8 k;
+  Enemy *e = &en[g * GSIZE];
+  u16 o = ((u16)(g_shape[g] * 17 + g_mm[g])) << 3;
+  const u8 *mx = morph_dx + o, *mz = morph_dz + o;
+  for (k = 0; k < GSIZE; k++, e++) { e->dx = *mx++; e->dzz = (u16)(*mz++) << 4; }
+}
+
+/* each formation runs a little routine: hold its shape, morph into a second
+ * one (column -> zigzag, diagonals swing over, snake -> ring, twin columns ->
+ * a semicircle fanned out to both sides that backs off), hold, morph back */
+void manoeuvre(u8 g) {
+  switch (g_ms[g]) {
+    case 0:
+      if (--g_mt[g]) return;
+      g_ms[g] = 1;
+      if (g_form[g] == 3) g_form[g] = 5;       /* stop the snake's wiggle */
+      return;
+    case 1:
+      if (g_t[g] & 2) return;                  /* one step every other update */
+      if (++g_mm[g] == 16) {
+        g_ms[g] = 2; g_mt[g] = 50 + (rand8() & 31);
+        if (g_shape[g] == 4) g_vz[g] = g_speed;   /* the fan backs away a little */
+      }
+      break;
+    case 2:
+      if (--g_mt[g]) return;
+      g_ms[g] = 3;
+      if (g_shape[g] == 4) g_vz[g] = -g_speed;
+      return;
+    default:
+      if (g_t[g] & 2) return;
+      if (--g_mm[g] == 0) {
+        g_ms[g] = 0; g_mt[g] = 70 + (rand8() & 63);
+        if (g_shape[g] == 3) g_form[g] = 3;
+      }
+      break;
+  }
+  group_shape(g);
+}
+
 void update_groups(void) {
   static u8 g, t, xh;
   static s16 r;
@@ -1711,6 +1761,7 @@ void update_groups(void) {
         break;
     }
     g_xh[g] = (u8)(g_x[g] >> 8);
+    if (g_vis[g]) manoeuvre(g);
     /* depth: approach, overshoot behind the player, swing back up */
     g_z[g] += g_vz[g] << 1;
     r = (s16)(g_z[g] - cam_z);           /* 12.4: units * 16 */
@@ -1795,6 +1846,7 @@ void spawn_group(u16 dist) {
   f = rand8() & 7;
   if (f > 4) f -= 3;
   g_type[g] = type; g_form[g] = f; g_t[g] = rand8(); g_dir[g] = rand8() & 1;
+  g_shape[g] = f; g_ms[g] = 0; g_mm[g] = 0; g_mt[g] = 40 + (rand8() & 63);
   if (type == 3) k = 112 + (rand8() & 31);
   else if (type == 0) k = 80 + (rand8() % 97);
   else k = 48 + (rand8() % 161);
@@ -2038,7 +2090,7 @@ void update_astro(void) {
   u8 rel, d;
   s16 r;
   if (bonus_timer) {
-    if (--bonus_timer == 0) { line_col = COL_LINE; line_dirty = 1; hud_dirty |= HUD_BONUS; }
+    if (--bonus_timer == 0) { line_dirty = 1; hud_dirty |= HUD_BONUS; }
   }
   if (!as_st) return;
   as_z -= 4;
@@ -2051,7 +2103,7 @@ void update_astro(void) {
     if (d < 14) {
       as_st = 0;
       bonus_timer = 600; bonus_val = 2;
-      line_col = COL_BONUS; line_dirty = 1; hud_dirty |= HUD_BONUS;
+      line_dirty = 1; hud_dirty |= HUD_BONUS;
       add_score(5, 0);
       sfx(sfx_pickup, SFX_CHANNEL2, 3);
     }
@@ -2060,9 +2112,17 @@ void update_astro(void) {
 
 void start_boss(void);
 void start_music(void);
+void field_colours(void);
+
+void field_colours(void) {
+  u8 s = (u8)(wave - 1) / 10, l = (u8)(wave - 1) % 10;
+  if (s > 4) s = 4;
+  line_col = seg_line[s][l]; rail_col = seg_rail[s][l >= 5]; line_dirty = 1;
+}
 
 void start_wave(void) {
   u8 w = wave;
+  field_colours();
   phase = PH_INTRO; phase_timer = 120;
   groups_left = w < 2 ? 2 : (w < 20 ? 3 : 4);   /* 16, then 24, then 32 enemies a wave */
   grp_max = w < 2 ? 2 : 3;
@@ -2079,7 +2139,7 @@ void start_wave(void) {
   boss_wave = (w % 10 == 0);
   if (boss_wave) {
     groups_left = 0; grp_max = 1;         /* one escort formation at a time */
-    if (bonus_timer) { bonus_timer = 0; line_col = COL_LINE; line_dirty = 1; }
+    if (bonus_timer) { bonus_timer = 0; hud_dirty |= HUD_BONUS; }
     show_msg("WAVE 00 - BOSS");
     start_boss();
     if (music_on) start_music();         /* switch to the boss music right away */
@@ -2282,8 +2342,12 @@ void begin_sprites(void) {
   n_spr = 0;
   if (pstate == PL_ALIVE) {
     if (!(invuln & 2)) {
-      draw16(eye_l ? px + 2 : px, PLAYER_Y, SPR_PLAYER + ((pvz > 0 && (keys & PORT_A_KEY_UP) && (frame & 2)) ? 4 : 0));
+      draw16(eye_l ? px + 2 : px, PLAYER_Y, SPR_PLAYER);
       band_add(PLAYER_Y, 2);
+      if (pvz > 2) {                   /* engine flames only while moving forward */
+        draw16(eye_l ? px + 2 : px, (u8)(PLAYER_Y + 13), SPR_FLAME + (pvz > 20 ? 8 : 0) + ((frame & 2) ? 4 : 0));
+        band_add((u8)(PLAYER_Y + 13), 2);
+      }
     }
   }
   ds_t0 = SPR_EBUL + ((frame & 4) ? 2 : 0); ds_t1 = SPR_EBUL_S;
@@ -2384,7 +2448,7 @@ void read_keys(void) {
 }
 
 void draw_hud_frame(void) {
-  print_at(0, 0, "SCORE 0000000         HI 0000000");
+  print_at(0, 0, " SCORE 0000000        HI 0000000");
   print_at(0, 1, " SHIPS 3               WAVE 01  ");
   print_at(0, 2, " WARP  3                        ");
   draw_radar_frame();
@@ -2416,62 +2480,156 @@ void death_vblank(void) {
 }
 
 /* ------------------------------------------------------------------ title */
-void print_3d_option(void) {
-  print_yel(4, 20, g3d == 0 ? "< > 3-D GLASSES: OFF        " :
-                   g3d == 1 ? "< > 3-D GLASSES: ON         " :
-                              "< > 3-D GLASSES: ON SWAPPED ");
+
+/* logo colours: pale yellow -> orange faces, dark red extrusion, white edges */
+const u8 logo_pal[7] = {RGB(3,3,2), RGB(3,3,0), RGB(3,2,0), RGB(3,1,0), RGB(2,0,0), RGB(1,0,0), RGB(3,3,3)};
+
+void clear_screen(void) {
+  u16 n;
+  SMS_setNextTileatXY(0, 0);
+  for (n = 0; n < 32 * 24; n++) SMS_setTile(0);
+}
+
+/* both menus keep the 3-D shutters running so the glasses stay in sync */
+u8 title_3d;                    /* title page showing: its logo gets stereo depth */
+
+void menu_frame(void) {
+  SMS_waitForVBlank();
+  frame++; rng += frame;
+  if (g3d) {
+    GLASSES = GLASS_VAL(frame);
+    if (title_3d && !(frame & 1)) {     /* left eye: per-band scroll gives the logo depth */
+      band_ptr = title_band;
+      SMS_setBGScrollX(title_band[0]);
+      SMS_enableLineInterrupt();
+    } else {
+      SMS_setBGScrollX(0);
+      SMS_disableLineInterrupt();
+    }
+  }
+  read_keys();
+  if (SMS_queryPauseRequested()) SMS_resetPauseRequest();
+}
+
+#define OPT_ROWS 3
+const char *const snd_name[10] = {
+  "GAME SONG ", "BOSS GROWL", "WAVE START", "GAME OVER ", "SHOT      ",
+  "EXPLOSION ", "SHIP LOST ", "RESCUE    ", "WARP      ", "EXTRA SHIP"};
+u8 snd_sel;
+
+void draw_options(u8 cur) {
+  u8 i;
+  for (i = 0; i < OPT_ROWS; i++) print_yel(4, 7 + i * 3, i == cur ? ">" : " ");
+  print_at(6, 7, g3d == 0 ? "3-D GLASSES  OFF        " :
+                 g3d == 1 ? "3-D GLASSES  ON         " :
+                            "3-D GLASSES  ON, SWAPPED");
+  print_at(6, 10, "SOUND TEST   ");
+  SMS_setTile((u16)(snd_sel / 10 + 16)); SMS_setTile((u16)(snd_sel % 10 + 16)); SMS_setTile(0);
+  print_at(22, 10, snd_name[snd_sel]);
+  print_at(6, 13, "EXIT");
+}
+
+void play_sound(u8 n) {
+  PSGStop(); PSGSFXStop(); sfx_prio = 0;
+  switch (n) {
+    case 0: PSGPlay((void *)mus_game); break;
+    case 1: PSGPlay((void *)mus_growl); break;
+    case 2: PSGPlayNoRepeat((void *)mus_start); break;
+    case 3: PSGPlayNoRepeat((void *)mus_over); break;
+    case 4: PSGSFXPlay((void *)sfx_shot, SFX_CHANNEL2); break;
+    case 5: PSGSFXPlay((void *)sfx_boom, SFX_CHANNEL3); break;
+    case 6: PSGSFXPlay((void *)sfx_die, SFX_CHANNELS2AND3); break;
+    case 7: PSGSFXPlay((void *)sfx_pickup, SFX_CHANNEL2); break;
+    case 8: PSGSFXPlay((void *)sfx_warp, SFX_CHANNEL2); break;
+    default: PSGSFXPlay((void *)sfx_extra, SFX_CHANNEL2); break;
+  }
+}
+
+void options(void) {
+  u8 cur = 0;
+  SMS_waitForVBlank();
+  SMS_displayOff();
+  clear_screen();
+  print_yel(12, 3, "OPTIONS");
+  draw_options(cur);
+  print_at(3, 16, "UP/DOWN    CHOOSE");
+  print_at(3, 17, "LEFT/RIGHT CHANGE");
+  print_at(3, 18, "BUTTON 1   PLAY SOUND / EXIT");
+  print_yel(3, 21, "IN THE GAME: 1 FIRE, 2 WARP");
+  print_at(3, 22, "50 WAVES - A BOSS EVERY 10TH");
+  SMS_displayOn();
+  for (;;) {
+    menu_frame();
+    if (pressed & PORT_A_KEY_UP) cur = cur ? cur - 1 : OPT_ROWS - 1;
+    else if (pressed & PORT_A_KEY_DOWN) cur = cur == OPT_ROWS - 1 ? 0 : cur + 1;
+    else if (pressed & (PORT_A_KEY_LEFT | PORT_A_KEY_RIGHT)) {
+      u8 rt = (pressed & PORT_A_KEY_RIGHT) != 0;
+      if (cur == 0) g3d = rt ? (g3d == 2 ? 0 : g3d + 1) : (g3d == 0 ? 2 : g3d - 1);
+      else if (cur == 1) snd_sel = rt ? (snd_sel == 9 ? 0 : snd_sel + 1) : (snd_sel == 0 ? 9 : snd_sel - 1);
+    } else if (pressed & PORT_A_KEY_1) {
+      if (cur == 1) play_sound(snd_sel);
+      else if (cur == 2) break;
+    } else if (pressed & PORT_A_KEY_2) break;
+    else continue;
+    draw_options(cur);
+  }
+  PSGStop(); PSGSFXStop();
 }
 
 void title(void) {
-  u8 r, i, blink = 0;
+  u8 r, i, blink = 0, redraw = 1;
   u16 idle = 0;
   game_state = ST_TITLE; demo = 0;
   SMS_waitForVBlank();
   SMS_displayOff();
+  SMS_VDPturnOffFeature(VDPFEATURE_LEFTCOLBLANK);
+  SMS_setBGScrollX(0);
   SMS_initSprites(); SMS_finalizeSprites(); SMS_copySpritestoSAT();
-  load_tiles_b3(logo_tiles, LOGO_BASE, sizeof(logo_tiles));
-  for (r = 0; r < 24; r++) draw_field_row(r);
-  print_at(0, 0, "SCORE 0000000         HI 0000000");
-  for (r = 0; r < LOGO_H; r++) {
-    SMS_setNextTileatXY(0, 4 + r); SMS_setTile(0);
-    for (i = 0; i < LOGO_W; i++) SMS_setTile((u16)(LOGO_BASE + logo_map[r * LOGO_W + i]));
-    SMS_setTile(0);
-  }
-  print_yel(5, 9, "FOR SEGA MASTER SYSTEM");
-  print_at(5, 14, "100   150   200   300");
-  print_yel(12, 17, "RESCUE = BONUS!");
-  print_at(8, 21, "1:FIRE   2:WARP");
-  print_at(1, 23, "A TRIBUTE TO KONAMI'S 1983 GAME");
-  print_yel(2, 22, "50 WAVES - A BOSS EVERY 10TH");
-  print_3d_option();
-  hud_dirty = HUD_SCORE | HUD_HI; hud_flush();
-  line_col = COL_LINE; line_dirty = 1;
-  SMS_displayOn();
+  load_tiles_b3(logo_tiles, LOGO_BASE, sizeof(logo_tiles));   /* borrows the field's tiles */
+  for (i = 2; i < 16; i++) SMS_setBGPaletteColor(i, 0);
+  for (i = 0; i < 7; i++) SMS_setBGPaletteColor(2 + i, logo_pal[i]);
+  SMS_setLineInterruptHandler(&line_interrupt);
+  SMS_setLineCounter(23);
+  band_n = 9; vdp_busy = 0;
   for (;;) {
-    read_keys();
-    if (SMS_queryPauseRequested()) SMS_resetPauseRequest();
-    frame++; rng += frame;
-    cam_z += 24;
+    if (redraw) {
+      title_3d = 1;
+      if (redraw == 2) { SMS_waitForVBlank(); SMS_displayOff(); }
+      clear_screen();
+      print_at(0, 0, " SCORE 0000000        HI 0000000");
+      for (r = 0; r < LOGO_H; r++) {
+        SMS_setNextTileatXY(0, 3 + r);
+        for (i = 0; i < LOGO_W; i++) SMS_setTile((u16)(LOGO_BASE + logo_map[r * LOGO_W + i]));
+      }
+      print_at(5, 18, "100   150   200   300");
+      print_yel(7, 21, "BUTTON 2: OPTIONS");
+      print_at(1, 23, "A TRIBUTE TO KONAMI'S 1983 GAME");
+      hud_dirty = HUD_SCORE | HUD_HI; hud_flush();
+      SMS_displayOn();
+      redraw = 0; idle = 0;
+    }
     SMS_initSprites();
-    for (i = 0; i < 4; i++) draw16(52 + i * 48, 92, SPR_ENEMY + i * 20 + ((frame & 16) ? 10 : 0));
-    draw16(80, 132, SPR_ASTRO + ((frame & 32) ? 10 : 0));
+    for (i = 0; i < 4; i++) draw16(52 + i * 48, 122, SPR_ENEMY + i * 20 + ((frame & 16) ? 10 : 0));
     SMS_finalizeSprites();
-    SMS_waitForVBlank();
+    menu_frame();
     SMS_copySpritestoSAT();
-    field_update();
     if (!(frame & 31)) {
       blink ^= 1;
-      if (blink) print_at(9, 19, "PUSH BUTTON 1"); else draw_field_row(19);
+      print_at(9, 20, blink ? "PUSH BUTTON 1" : "             ");
     }
-    if (pressed & (PORT_A_KEY_LEFT | PORT_A_KEY_RIGHT)) {
-      g3d = (pressed & PORT_A_KEY_RIGHT) ? (g3d == 2 ? 0 : g3d + 1) : (g3d == 0 ? 2 : g3d - 1);
-      print_3d_option();
-      idle = 0;
-    }
-    if (g3d) GLASSES = GLASS_VAL(frame);
     if (pressed & PORT_A_KEY_1) break;
+    if (pressed & PORT_A_KEY_2) {
+      SMS_initSprites(); SMS_finalizeSprites(); SMS_copySpritestoSAT();
+      title_3d = 0;
+      options();
+      redraw = 2; continue;
+    }
+    if (pressed) idle = 0;
     if (++idle == 600) { demo = 1; demo_timer = 2400; break; }
   }
+  title_3d = 0;
+  SMS_disableLineInterrupt();
+  SMS_setBGScrollX(0);
 }
 
 /* ----------------------------------------------------------------- ending */
@@ -2497,7 +2655,7 @@ void ending(void) {
   for (k = 0; k < ships; k++) add_score(100, 0);         /* 10,000 per ship left */
   for (k = 0; k < MAX_BU; k++) bu_t[k] = 0;
   pstate = PL_ALIVE; invuln = 0; eye_l = 0;
-  line_col = COL_LINE; line_dirty = 1;
+  field_colours();
   PSGStop(); PSGSFXStop();
   PSGPlay((void *)mus_game);
   for (;;) {
@@ -2515,7 +2673,10 @@ void ending(void) {
     if (shiprel < 223) {
       sx = projx(px, shiprel);
       if (sx) {
-        if (shiprel < 90) draw16(sx, ylut[shiprel] - 8, SPR_PLAYER + ((frame & 2) ? 4 : 0));
+        if (shiprel < 90) {
+          draw16(sx, ylut[shiprel] - 8, SPR_PLAYER);
+          if (shiprel < 70) draw16(sx, ylut[shiprel] + 5, SPR_FLAME + 8 + ((frame & 2) ? 4 : 0));
+        }
         else SMS_addSprite(sx - 4, ylut[shiprel] - 8, SPR_PLAYER_SMALL);
       }
     }
@@ -2555,6 +2716,7 @@ void play(void) {
   SMS_waitForVBlank();
   SMS_displayOff();
   SMS_initSprites(); SMS_finalizeSprites(); SMS_copySpritestoSAT();
+  load_tiles_b3(field_tiles, FIELD_BASE, sizeof(field_tiles));   /* the title logo borrowed them */
   load_tiles_b3(burst_tiles, BURST_BASE, sizeof(burst_tiles));
   radar_static();
   SMS_loadTiles(radar_buf, RADAR_BASE, sizeof(radar_buf));
@@ -2571,7 +2733,6 @@ void play(void) {
   lives = 3; wave = 1; warps = 1;
   px = 128; pxf = 0x8000u; pvx = 0; pvz = 0; pstate = PL_ALIVE; invuln = 60; fire_cd = 0;
   bonus_timer = 0; astro_cd = 6;
-  line_col = COL_LINE; line_dirty = 1;
   msg_state = 0; msg_on = 0; sfx_prio = 0; music_on = 0; cur_track = 0;
   n_vis = 0;
   radar_static();
@@ -2580,6 +2741,8 @@ void play(void) {
   hud_dirty = 0xFF; hud_flush(); msg_flush();
   band_ptr = band_zero; band_n = 9;
   vdp_busy = 0;
+  if (g3d) SMS_VDPturnOnFeature(VDPFEATURE_LEFTCOLBLANK);   /* hides the scrolled-in column */
+  else SMS_VDPturnOffFeature(VDPFEATURE_LEFTCOLBLANK);
   if (g3d) {
     SMS_setLineInterruptHandler(&line_interrupt);
     SMS_setLineCounter(23);            /* IRQ after lines 23, 47, 71 ... */
@@ -2634,13 +2797,8 @@ void play(void) {
     SMS_copySpritestoSAT();
     if (g3d) {
       GLASSES = GLASS_VAL(frame);  /* open the shutter for the eye just built */
-      if (msg_on || demo == 1) {       /* row 11 text: every-row bands, text in front */
-        band_ptr = eye_l ? rows_left_msg : band_zero; band_n = 25;
-        SMS_setLineCounter(7);
-      } else {
-        band_ptr = eye_l ? band_left : band_zero; band_n = 9;
-        SMS_setLineCounter(23);
-      }
+      /* row 11 text: the band holding it (rows 9-11) moves in front of the field */
+      band_ptr = eye_l ? ((msg_on || demo == 1) ? band_left_msg : band_left) : band_zero;
       SMS_setBGScrollX(0);
       if (eye_l) SMS_enableLineInterrupt(); else SMS_disableLineInterrupt();
     }
@@ -2702,6 +2860,6 @@ void main(void) {
 }
 
 SMS_EMBED_SEGA_ROM_HEADER(9999, 0);
-SMS_EMBED_SDSC_HEADER_AUTO_DATE(1, 1, "Claude",
+SMS_EMBED_SDSC_HEADER_AUTO_DATE(1, 5, "Claude",
     "Juno First SMS",
     "A tribute to Konami's Juno First for the Sega Master System. Built with devkitSMS.");

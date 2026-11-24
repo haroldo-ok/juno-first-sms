@@ -1,0 +1,29 @@
+symbols junofirst.noi
+echo 3D on via the options, then a stereo pair of the wave message
+run 60
+tap 2
+run 10
+tap right
+run 2
+tap 2
+run 10
+tap 1
+waituntil game_state == 1 60 w1
+run 20
+waituntil eye_l == 1 4 w1
+screenshot shots/msg_a.ppm
+run 1
+screenshot shots/msg_b.ppm
+poke lives 9 w1
+poke invuln 250 w1
+echo a formation in its second shape
+waituntil g_ms == 2 1500 w1
+waituntil g_ms == 2 1500 w1
+screenshot shots/morph_a.ppm
+print g_shape w1
+print g_mm w1
+print g_vis w1
+print {g_vis+1} w1
+print {g_vis+2} w1
+print {g_shape+1} w1
+print {g_ms+1} w1

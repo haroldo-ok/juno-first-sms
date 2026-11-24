@@ -1,0 +1,12 @@
+symbols junofirst.noi
+run 60
+tap 1
+waituntil phase == 1 300 w1
+poke invuln 250 w1
+poke loops 0
+hold up+1
+profstart
+run 300
+profstop
+print loops
+profdump shots/prof.out

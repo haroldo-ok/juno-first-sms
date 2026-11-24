@@ -1,7 +1,11 @@
 symbols junofirst.noi
 
-echo [1] title: right selects 3D ON, left/right cycle the three modes
+echo [1] options menu (button 2 on the title): right selects 3D ON, left/right cycle the three modes
 run 60
+tap 2
+run 10
+expect g3d == 0 w1
+screenshot shots/options.ppm
 tap right
 run 2
 expect g3d == 1 w1
@@ -17,7 +21,20 @@ expect g3d == 2 w1
 tap left
 run 2
 expect g3d == 1 w1
+echo     down twice to EXIT, button 1 leaves for the title
+tap down
+run 2
+tap down
+run 2
+tap 1
+run 10
 screenshot shots/3d_title.ppm
+echo     the title logo gets depth too: 8 line IRQs on each left-eye frame
+poke stat_lineirq 0
+poke {stat_lineirq+1} 0
+run 100
+expect stat_lineirq >= 390
+expect stat_lineirq <= 410
 
 echo [2] the shutter alternates every frame on the title
 run 1
@@ -29,11 +46,11 @@ echo [3] in game: line interrupts drive per-row scroll, shutter alternates
 tap 1
 waituntil game_state == 1 60 w1
 run 10
-echo     while "WAVE 01" shows, its row gets its own band (an IRQ every 8 lines)
+echo     while "WAVE 01" shows, its band (rows 9-11) moves in front of the field
 expect msg_on == 1 w1
 poke stat_lineirq 0
 run 60
-expect stat_lineirq >= 700
+expect stat_lineirq >= 220
 print stat_lineirq
 waituntil phase == 1 200 w1
 run 2

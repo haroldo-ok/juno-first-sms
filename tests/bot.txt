@@ -1,0 +1,281 @@
+symbols junofirst.noi
+run 60
+tap 1
+waituntil phase == 1 300 w1
+poke loops 0
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+echo t=1200
+print wave w1
+print lives w1
+print game_state w1
+print loops
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+echo t=2400
+print wave w1
+print lives w1
+print game_state w1
+print loops
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+hold left+1
+run 30
+hold right+up+1
+run 30
+hold right+1
+run 30
+hold left+up+1
+run 30
+echo t=3600
+print wave w1
+print lives w1
+print game_state w1
+print loops
+screenshot shots/bot1.ppm
+print en_count w1
+print wave_left w1
+print 0xC042 w1
+print 0xC043 w1
+print 0xC044 w1
+print 0xC063 w1
+print 0xC064 w1
+print 0xC066 w1
+print 0xC067 w1
+print 0xC068 w1
+print 0xC069 w1
+print 0xC0C0 w1
+print 0xC0C1 w1
+print 0xC0C2 w1
+print 0xC0C9 w1
+print 0xC0CA w1
+print 0xC0CB w1
+print px w1
+print score w1
+print 0xC009 w1

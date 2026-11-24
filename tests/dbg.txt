@@ -1,0 +1,65 @@
+symbols dbg.noi
+run 60
+tap 1
+waituntil phase == 1 300 w1
+poke invuln 250 w1
+hold up+1
+run 900
+print 0xC053 w1
+print 0xC054 w1
+print 0xC055 w1
+print 0xC056 w1
+print 0xC057 w1
+print 0xC058 w1
+print 0xC059 w1
+print 0xC05A w1
+print 0xC05B w1
+print 0xC05C w1
+print 0xC05D w1
+print 0xC05E w1
+print 0xC05F w1
+print 0xC060 w1
+print 0xC061 w1
+print 0xC062 w1
+print 0xC063 w1
+print 0xC064 w1
+print 0xC065 w1
+print 0xC066 w1
+print 0xC067 w1
+print 0xC068 w1
+print 0xC069 w1
+print 0xC06A w1
+print 0xC06B w1
+print 0xC06C w1
+print 0xC085 w1
+print 0xC086 w1
+print 0xC087 w1
+print 0xC088 w1
+print 0xC089 w1
+print 0xC08A w1
+print 0xC08B w1
+print 0xC08C w1
+print 0xC08D w1
+print 0xC08E w1
+print 0xC08F w1
+print 0xC090 w1
+print 0xC091 w1
+print 0xC092 w1
+print 0xC093 w1
+print 0xC094 w1
+print 0xC095 w1
+print 0xC096 w1
+print 0xC097 w1
+print 0xC098 w1
+print 0xC099 w1
+print 0xC09A w1
+print 0xC09B w1
+print 0xC09C w1
+print 0xC09D w1
+print 0xC09E w1
+print miss_kill w1
+print ok_kill w1
+print miss_fire w1
+print ok_fire w1
+print miss_spawn w1
+print miss_total w1

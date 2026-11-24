@@ -1,7 +1,11 @@
 symbols junofirst.noi
 run 60
+tap 2
+run 10
 tap right
 run 2
+tap 2
+run 10
 tap 1
 waituntil phase == 1 300 w1
 poke lives 9 w1

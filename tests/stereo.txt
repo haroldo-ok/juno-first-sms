@@ -1,0 +1,18 @@
+symbols junofirst.noi
+run 60
+tap right
+run 2
+tap 1
+waituntil phase == 1 300 w1
+poke lives 9 w1
+poke invuln 250 w1
+waituntil n_vis >= 6 900 w1
+run 1
+dumpstate shots/st_0.bin
+print eye_l w1
+run 1
+dumpstate shots/st_1.bin
+print eye_l w1
+run 1
+dumpstate shots/st_2.bin
+print eye_l w1

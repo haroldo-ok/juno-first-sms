@@ -1,0 +1,52 @@
+symbols junofirst.noi
+run 60
+tap 1
+waituntil phase == 1 300 w1
+poke wave 4 w1
+poke groups_left 0 w1
+poke 0xC07B 0 w1
+poke 0xC089 0 w1
+poke 0xC097 0 w1
+poke 0xC0A5 0 w1
+poke 0xC0B3 0 w1
+poke 0xC0C1 0 w1
+poke 0xC0CF 0 w1
+poke 0xC0DD 0 w1
+poke 0xC0EB 0 w1
+poke 0xC0F9 0 w1
+poke 0xC107 0 w1
+poke 0xC115 0 w1
+poke 0xC123 0 w1
+poke 0xC131 0 w1
+poke 0xC13F 0 w1
+poke 0xC14D 0 w1
+poke 0xC15B 0 w1
+poke 0xC169 0 w1
+poke 0xC177 0 w1
+poke 0xC185 0 w1
+poke 0xC193 0 w1
+poke 0xC1A1 0 w1
+poke 0xC1AF 0 w1
+poke 0xC1BD 0 w1
+poke en_count 0 w1
+poke 0xC054 0 w1
+poke 0xC055 0 w1
+poke 0xC056 0 w1
+waituntil wave == 5 30 w1
+waituntil phase == 1 300 w1
+poke lives 9 w1
+poke invuln 250 w1
+hold up
+waituntil n_vis >= 14 900 w1
+hold none
+run 2
+screenshot shots/form_a.ppm
+poke invuln 250 w1
+run 40
+screenshot shots/form_b.ppm
+hold 1
+run 30
+screenshot shots/form_c.ppm
+print n_vis w1
+print stat_degraded
+print stat_dropped

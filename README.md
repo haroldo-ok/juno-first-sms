@@ -19,13 +19,21 @@ emulator, and a player has reported it working on a Mark III.
 | Button 1      | Fire: one shot per press, no auto-fire                    |
 | Button 2      | Warp: emergency escape (see below)                        |
 | Pause         | Pause                                                     |
-| Left/right on the title screen | 3-D glasses: OFF, ON, or ON SWAPPED |
+| Button 2 on the title screen | Options menu (3-D glasses, sound test) |
 
 Fly over the perspective field and destroy every formation to clear the
 wave. Each wave sends formations of eight enemies (up to three in the air
-at once) in columns, diagonals, twin columns and snaking lines. Enemies fire
-at you, peel off to dive at you, and loop back to their place in the
-formation. Formations that you leave behind turn round and come back.
+at once) in columns, diagonals, twin columns and snaking lines. Each formation
+also changes shape while it flies: a column splits into a zigzag, a diagonal
+swings over to its mirror image, a snake curls into a ring, and twin columns
+fan out into a semicircle to both sides, back away a little and then close up
+into columns again. Enemies fire at you, peel off to dive at you, and loop back
+to their place in the formation. Formations that you leave behind turn round
+and come back.
+
+The field's colour tells you how far you've got: **green** for waves 1–10,
+**yellow** for 11–20, **blue** for 21–30, **purple** for 31–40 and **red** for
+41–50, getting brighter wave by wave within each set of ten.
 
 There are **50 waves**, and the game gets harder all the way: more and faster
 enemies, more shots and more divers. **Every tenth wave is a boss**. It
@@ -57,7 +65,7 @@ ship.
   the astronaut blinks white.
 - **Astronaut**: every so often a destroyed enemy leaves an astronaut
   floating towards you. Collect it for 500 points and about ten seconds of
-  bonus mode: the field turns red and each kill scores 200, 400, 600 … up
+  bonus mode: the field's column lines light up and each kill scores 200, 400, 600 … up
   to 2,000.
 - **Points**: saucer 100, dart 150, spinner 200, bomber 300. Each hit on a boss
   scores 10, and destroying one scores 5,000 times its number (5,000 for the
@@ -70,13 +78,19 @@ ship.
 - **Music**: the melodic song plays during normal waves and the menacing growl
   during boss fights. The Toccata opening plays at the start and the song again
   in the ending.
+- **Engine flames** stream from your ship while it moves forward, longer at
+  high speed; they go out when you stop or reverse.
+- **Title and options**: button 1 starts, button 2 opens the options menu
+  (up/down to choose, left/right to change, button 1 to play a sound or leave,
+  button 2 to leave). It holds the 3-D glasses setting and a sound test for
+  every tune and sound effect.
 - **Attract mode**: leave the title screen alone for 10 seconds and the
   game plays itself; press any button to return.
 
 ## 3-D glasses (optional)
 
-The game supports the SegaScope 3-D glasses. Select **3-D GLASSES: ON** on the
-title screen with left/right. Frames then alternate between the left and
+The game supports the SegaScope 3-D glasses. Press button 2 on the title screen
+and set **3-D GLASSES** to **ON** with left/right. Frames then alternate between the left and
 right eye, with the shutters switched in sync:
 
 - The field recedes into the screen. On left-eye frames a line interrupt
@@ -85,10 +99,19 @@ right eye, with the shutters switched in sync:
 - Enemies, shots, particles, the astronaut and the bosses are offset by their
   depth on the same scale.
 - Your ship floats 2 px in front of the screen.
-- Mid-screen messages ("WAVE 10", "GAME OVER") float 3 px in front. While one is
-  showing, the line interrupt runs every 8 scanlines so the message row gets
-  its own scroll.
+- Mid-screen messages ("WAVE 10", "GAME OVER") float 3 px in front: while one
+  is showing, the band that holds it (tile rows 9–11) gets the message's
+  scroll instead of the field's. Earlier versions switched the line interrupt
+  to every 8 scanlines for this, which garbled the text on real hardware; the
+  interrupt now always runs every 24 lines.
+- The leftmost 8-pixel column is blanked in 3-D mode (VDP register 0 bit 5),
+  because the per-band scroll would otherwise show junk there. The HUD starts
+  at column 1 for this reason.
 - The HUD and radar stay at the screen plane.
+- The title screen is in 3-D too: the logo tilts from about 4 px behind the
+  screen at the top of "JUNO" to 2 px in front at the bottom of "FIRST"
+  (the same 24-line scroll bands as the field), while the text stays at the
+  screen plane. The options menu is flat.
 - Each eye gets 30 images a second, as in Sega's own 3-D games, so the picture
   flickers without the glasses.
 
@@ -124,7 +147,17 @@ Hardware notes:
 - **Williams-style effects**: dashed laser shots; enemies burst into eight
   particles flying outward; when your ship is hit, the whole field turns
   into an expanding ring explosion (tilemap swap plus palette animation)
-  centred on the ship.
+  centred on the ship. Its eleven rings are evenly dotted all the way round
+  and roll out to the edges of the screen; the ring map is 64 columns wide so
+  the rings never wrap round onto the far side when the ship is off centre.
+- **Title screen**: a big "JUNO FIRST" logo in thick block letters lying on a
+  plane that tilts away from you, so the letters narrow and flatten towards
+  the top (original art: the generator builds the letters from a 5×7 font,
+  gives them thickness, renders them in true perspective with 3×3
+  supersampling and cuts the result into 182 unique tiles). It sits over a
+  still black background and borrows tile slots 64–255 (the font's unused
+  lower-case slots plus the field's); the game reloads the field tiles when
+  you start.
 - **No sprite flicker by default**: a software limiter counts sprites per
   scanline band and never lets the VDP's 8-per-line limit drop an enemy or an
   enemy shot. Over budget, a near enemy falls back to its one-sprite far image
@@ -188,10 +221,13 @@ input and check game variables:
 - `ending.in`: the wave-50 boss is the final one. Destroying it plays the
   ending (no wave 51), and a button returns to the title with the high score
   kept.
-- `glasses.in`: 3-D mode. The title option cycles, the shutter value (read back
-  through the RAM mirror at `$DFF8`) alternates every frame, and the line
-  interrupt fires every 8 lines while a message is showing and 8 times per
-  left-eye frame otherwise. The frame rate holds.
+- `glasses.in`: 3-D mode. The options menu (button 2 on the title) cycles the
+  setting, the shutter value (read back through the RAM mirror at `$DFF8`)
+  alternates every frame, and the line interrupt fires 8 times per left-eye
+  frame on the title (logo depth) and in the game, with or without a message
+  showing. The frame rate holds.
+- `look.in`, `look2.in`, `look3.in`: screenshot scripts (not part of `make playtest`) for
+  the 3-D message pair, a formation mid-manoeuvre and the ship explosion.
   (Note for screenshot-based checks: `smstest` ends a frame after VBlank, so a
   screenshot combines the scroll values of the frame just shown with the
   sprites already uploaded for the next frame. Compare like with like.)
