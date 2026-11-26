@@ -108,10 +108,17 @@ right eye, with the shutters switched in sync:
   because the per-band scroll would otherwise show junk there. The HUD starts
   at column 1 for this reason.
 - The HUD and radar stay at the screen plane.
-- The title screen is in 3-D too: the logo tilts from about 4 px behind the
-  screen at the top of "JUNO" to 2 px in front at the bottom of "FIRST"
-  (the same 24-line scroll bands as the field), while the text stays at the
-  screen plane. The options menu is flat.
+- The title screen is in 3-D too, at two depths: the whole word "JUNO" (and
+  the score line above it) sits 2 px behind the screen and the whole word
+  "FIRST" 2 px in front, with the text below at the screen plane. One line
+  interrupt, placed in the blank gap between the two words (the generator
+  finds it and emits `TITLE_SPLIT`), changes the scroll, so neither word is
+  cut into slices. The options menu is flat.
+- Line interrupts are switched off before any screen is redrawn (title,
+  options, ending). The interrupt rewrites the scroll register, and on real
+  hardware a register write moves the VDP's address pointer, so an interrupt
+  in the middle of a redraw scattered tiles across the screen (seen on the
+  options screen after a 3-D game in v1.5).
 - Each eye gets 30 images a second, as in Sega's own 3-D games, so the picture
   flickers without the glasses.
 
@@ -223,9 +230,14 @@ input and check game variables:
   kept.
 - `glasses.in`: 3-D mode. The options menu (button 2 on the title) cycles the
   setting, the shutter value (read back through the RAM mirror at `$DFF8`)
-  alternates every frame, and the line interrupt fires 8 times per left-eye
-  frame on the title (logo depth) and in the game, with or without a message
-  showing. The frame rate holds.
+  alternates every frame, and the line interrupt fires 3 times per left-eye
+  frame on the title (one split for the logo's two depths) and 8 times in the
+  game, with or without a message showing. The frame rate holds.
+- `radar.in` + `check_radar.py`: after the title screen, the radar shows the
+  ship and the formations (v1.5's title blanked the radar's two palette
+  colours, so the radar looked empty).
+- `opts3d.in` + `same_ppm.py`: the options screen after a 3-D game over is
+  pixel-identical to the options screen on a fresh boot.
 - `look.in`, `look2.in`, `look3.in`: screenshot scripts (not part of `make playtest`) for
   the 3-D message pair, a formation mid-manoeuvre and the ship explosion.
   (Note for screenshot-based checks: `smstest` ends a frame after VBlank, so a

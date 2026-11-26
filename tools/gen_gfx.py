@@ -645,7 +645,14 @@ with open(sys.argv[1], 'w') as f:
     f.write(carr('band_left_msg', mb))
     # title in 3-D (left eye, 9 bands of 24 lines): the logo (rows 3-14) tilts
     # from 4 px behind the screen at the top to 2 px in front at the bottom
-    f.write(carr('title_band', [0, (-4) & 255, (-2) & 255, 0, 2, 0, 0, 0, 0]))
+    # two depths, split in the blank gap between the words: "JUNO" (and the
+    # score line above it) 2 px behind the screen, "FIRST" 2 px in front,
+    # the text below at the screen plane
+    used = [y for y in range(len(logo)) if any(logo[y])]
+    gap = [y for y in range(used[0], used[-1]) if not any(logo[y])]   # between the words
+    mid = 24 + gap[len(gap)//2]                  # the logo starts at row 3 = line 24
+    f.write('#define TITLE_SPLIT %d   /* line counter: first IRQ ends line %d */\n' % (mid - 1, mid - 1))
+    f.write(carr('title_band', [(-2) & 255, 2, 0, 0]))
     print("3D parallax: horizon %d px, bottom %d px" % (par[223], par[0]), file=sys.stderr)
     # formation manoeuvres: each shape morphs (m = 0..16) into a second shape and back
     FDX = [[0]*8, [-28, -20, -12, -4, 4, 12, 20, 28], [28, 20, 12, 4, -4, -12, -20, -28], [0]*8,

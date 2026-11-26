@@ -1,0 +1,19 @@
+symbols junofirst.noi
+echo options after a 3-D game over must look exactly like options on a fresh boot
+run 60
+tap 2
+run 10
+tap right
+run 30
+screenshot shots/opts_a.ppm
+tap 2
+run 10
+tap 1
+waituntil game_state == 1 60 w1
+poke lives 1 w1
+run 100
+waituntil game_state == 0 6000 w1
+run 30
+tap 2
+run 30
+screenshot shots/opts_b.ppm

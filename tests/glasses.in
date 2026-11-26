@@ -29,12 +29,12 @@ run 2
 tap 1
 run 10
 screenshot shots/3d_title.ppm
-echo     the title logo gets depth too: 8 line IRQs on each left-eye frame
+echo     the title logo gets depth too: JUNO behind, FIRST in front - 3 line IRQs per left-eye frame
 poke stat_lineirq 0
 poke {stat_lineirq+1} 0
 run 100
-expect stat_lineirq >= 390
-expect stat_lineirq <= 410
+expect stat_lineirq >= 145
+expect stat_lineirq <= 155
 
 echo [2] the shutter alternates every frame on the title
 run 1

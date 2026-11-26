@@ -387,8 +387,9 @@ const unsigned char rows_left_msg[25] = {
 const unsigned char band_left_msg[9] = {
   0,251,251,3,251,251,252,253,0,
 };
-const unsigned char title_band[9] = {
-  0,252,254,0,2,0,0,0,0,
+#define TITLE_SPLIT 58   /* line counter: first IRQ ends line 58 */
+const unsigned char title_band[4] = {
+  254,2,0,0,
 };
 const unsigned char morph_dx[680] = {
   0,0,0,0,0,0,0,0,1,255,1,255,1,255,1,255,

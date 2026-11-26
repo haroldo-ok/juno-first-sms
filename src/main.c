@@ -2547,7 +2547,10 @@ void play_sound(u8 n) {
 
 void options(void) {
   u8 cur = 0;
+  title_3d = 0;
+  SMS_disableLineInterrupt();          /* the title's line IRQ would corrupt the redraw */
   SMS_waitForVBlank();
+  SMS_setBGScrollX(0);
   SMS_displayOff();
   clear_screen();
   print_yel(12, 3, "OPTIONS");
@@ -2579,22 +2582,23 @@ void options(void) {
 void title(void) {
   u8 r, i, blink = 0, redraw = 1;
   u16 idle = 0;
-  game_state = ST_TITLE; demo = 0;
+  game_state = ST_TITLE; demo = 0; title_3d = 0;
+  SMS_disableLineInterrupt();          /* a line IRQ mid-upload would corrupt VRAM */
   SMS_waitForVBlank();
   SMS_displayOff();
   SMS_VDPturnOffFeature(VDPFEATURE_LEFTCOLBLANK);
   SMS_setBGScrollX(0);
   SMS_initSprites(); SMS_finalizeSprites(); SMS_copySpritestoSAT();
   load_tiles_b3(logo_tiles, LOGO_BASE, sizeof(logo_tiles));   /* borrows the field's tiles */
-  for (i = 2; i < 16; i++) SMS_setBGPaletteColor(i, 0);
+  for (i = 2; i < 14; i++) SMS_setBGPaletteColor(i, 0);   /* 14/15 are the radar's */
   for (i = 0; i < 7; i++) SMS_setBGPaletteColor(2 + i, logo_pal[i]);
   SMS_setLineInterruptHandler(&line_interrupt);
-  SMS_setLineCounter(23);
-  band_n = 9; vdp_busy = 0;
+  SMS_setLineCounter(TITLE_SPLIT);     /* one scroll change in the gap between the words */
+  band_n = 4; vdp_busy = 0;
   for (;;) {
     if (redraw) {
       title_3d = 1;
-      if (redraw == 2) { SMS_waitForVBlank(); SMS_displayOff(); }
+      if (redraw == 2) { SMS_disableLineInterrupt(); SMS_waitForVBlank(); SMS_displayOff(); }
       clear_screen();
       print_at(0, 0, " SCORE 0000000        HI 0000000");
       for (r = 0; r < LOGO_H; r++) {
@@ -2615,7 +2619,9 @@ void title(void) {
     SMS_copySpritestoSAT();
     if (!(frame & 31)) {
       blink ^= 1;
+      vdp_busy = 1;                    /* keep the line IRQ off the VDP meanwhile */
       print_at(9, 20, blink ? "PUSH BUTTON 1" : "             ");
+      vdp_busy = 0;
     }
     if (pressed & PORT_A_KEY_1) break;
     if (pressed & PORT_A_KEY_2) {
@@ -2655,6 +2661,8 @@ void ending(void) {
   for (k = 0; k < ships; k++) add_score(100, 0);         /* 10,000 per ship left */
   for (k = 0; k < MAX_BU; k++) bu_t[k] = 0;
   pstate = PL_ALIVE; invuln = 0; eye_l = 0;
+  SMS_disableLineInterrupt();          /* flat field for the ending, no stray scroll bands */
+  SMS_waitForVBlank(); SMS_setBGScrollX(0);
   field_colours();
   PSGStop(); PSGSFXStop();
   PSGPlay((void *)mus_game);
@@ -2860,6 +2868,6 @@ void main(void) {
 }
 
 SMS_EMBED_SEGA_ROM_HEADER(9999, 0);
-SMS_EMBED_SDSC_HEADER_AUTO_DATE(1, 5, "Claude",
+SMS_EMBED_SDSC_HEADER_AUTO_DATE(1, 6, "Claude",
     "Juno First SMS",
     "A tribute to Konami's Juno First for the Sega Master System. Built with devkitSMS.");

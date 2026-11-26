@@ -1,0 +1,8 @@
+symbols junofirst.noi
+echo radar: after the title (which borrows palette and tiles) the radar shows the ship and formations
+run 60
+tap 1
+waituntil game_state == 1 60 w1
+poke invuln 250 w1
+run 400
+screenshot shots/radar.ppm

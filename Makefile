@@ -41,8 +41,14 @@ playtest: $(PROG).sms
 	smstest $(PROG).sms tests/glasses.txt
 	python3 tests/mkplaytest.py $(PROG).noi tests/boss.in > tests/boss.txt
 	smstest $(PROG).sms tests/boss.txt
-	python3 tests/mkplaytest.py $(PROG).noi tests/ending.in > tests/ending.txt
-	smstest $(PROG).sms tests/ending.txt
+	python3 tests/mkplaytest.py $(PROG).noi tests/ending.in > tests/ending.txt tests/radar.txt tests/opts3d.txt
+	smstest $(PROG).sms tests/ending.txt tests/radar.txt tests/opts3d.txt
+	python3 tests/mkplaytest.py $(PROG).noi tests/radar.in > tests/radar.txt
+	smstest $(PROG).sms tests/radar.txt
+	python3 tests/check_radar.py shots/radar.ppm
+	python3 tests/mkplaytest.py $(PROG).noi tests/opts3d.in > tests/opts3d.txt
+	smstest $(PROG).sms tests/opts3d.txt
+	python3 tests/same_ppm.py shots/opts_a.ppm shots/opts_b.ppm
 
 clean:
 	rm -f *.rel *.ihx *.sym *.lst *.map *.noi *.lk *.asm *.rst $(PROG).sms src/gfx.h src/gfxbank.c src/bossgfx.c src/snd.h src/snd.c
